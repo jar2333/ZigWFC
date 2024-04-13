@@ -46,17 +46,15 @@ pub const WFCError = error{
 };
 
 pub fn Solver(comptime TileT: type) type {
-    if (TileT != SquareTile and TileT != CubeTile) {
-        @compileError("Tile type " ++ @typeName(TileT) ++ " not supported.");
-    }
+    const DimensionT: type = switch (TileT) {
+        SquareTile => SquareDimensions,
+        CubeTile => CubeDimensions,
+        else => @compileError("Tile type " ++ @typeName(TileT) ++ " not supported.")
+    };
+
     return struct {
         const Self = @This();
-        const DimensionT: type = switch (TileT) {
-            SquareTile => SquareDimensions,
-            CubeTile => CubeDimensions,
-            else => @compileError("Tile type " ++ @typeName(TileT) ++ " not supported.")
-        };
-
+        
         allocator: std.mem.Allocator = undefined,
         tileset: []const TileT = undefined,
 
