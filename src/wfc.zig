@@ -10,9 +10,8 @@ const std = @import("std");
 // - Hexagonal grid
 //
 // Input:
-// - An array of structs specifying adjacency data for tiles.
-// - A (flat) array that will be populated with the indexes of the tiles
-// - An enum value that determines the type of grid/tiles used (maybe can be omitted through reflection on 1st arg) 
+// - A const array of structs specifying adjacency data for tiles.
+// - A mutable (flat, multidimensional) array/slice that will be populated with the indexes of the tiles
 
 pub const SquareTile = struct {
     xpos: u32,
@@ -54,7 +53,7 @@ pub fn Solver(comptime TileT: type) type {
 
     return struct {
         const Self = @This();
-        
+
         allocator: std.mem.Allocator = undefined,
         tileset: []const TileT = undefined,
 
@@ -85,7 +84,7 @@ pub fn Solver(comptime TileT: type) type {
 const testing = std.testing;
 const test_allocator = std.testing.allocator;
 
-test "basic add functionality" {
+test "basic solver test" {
     const allocator = test_allocator;
 
     const tiles = [_]SquareTile{
