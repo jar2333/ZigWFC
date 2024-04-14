@@ -13,11 +13,16 @@ const std = @import("std");
 // - A const array of structs specifying adjacency data for tiles.
 // - A mutable (flat, multidimensional) array/slice that will be populated with the indexes of the tiles
 
-pub const SquareTile = struct {
-    xpos: u32,
-    xneg: u32,
-    ypos: u32,
-    yneg: u32
+// Implementation detail:
+// The Tile types are packed structs. This allows treating them like 
+// circular buffers through @bitCast, to efficiently find opposite sides.
+// i.e. The opposite side to tile[i] is tile[i+(num_sides/2) % num_sides]
+
+pub const SquareTile = packed struct {
+    xpos: u32 = 0,
+    ypos: u32 = 0,
+    xneg: u32 = 0,
+    yneg: u32 = 0
 };
 
 const SquareDimensions = struct {
@@ -25,13 +30,13 @@ const SquareDimensions = struct {
     y: u32
 };
 
-pub const CubeTile = struct {
-    xpos: u32,
-    xneg: u32,
-    ypos: u32,
-    yneg: u32,
-    zpos: u32,
-    zneg: u32
+pub const CubeTile = packed struct {
+    xpos: u32 = 0,
+    ypos: u32 = 0,
+    zpos: u32 = 0,
+    xneg: u32 = 0,
+    yneg: u32 = 0,
+    zneg: u32 = 0
 };
 
 const CubeDimensions = struct {
@@ -41,7 +46,8 @@ const CubeDimensions = struct {
 };
 
 pub const WFCError = error{
-    InvalidGridSize
+    InvalidGridSize,
+    Contradiction
 };
 
 pub fn Solver(comptime TileT: type) type {
@@ -52,9 +58,7 @@ pub fn Solver(comptime TileT: type) type {
         else => @compileError("Tile type " ++ @typeName(TileT) ++ " not supported.")
     };
     const dim: comptime_int = @typeInfo(DimensionT).Struct.fields.len;
-
-    // Only implemented for SquareTile and CubeTile (number of sides in an n-cube is n*2^(n-1))
-    const num_sides: comptime_int = dim*@exp2(dim-1);
+    const num_sides: comptime_int = @typeInfo(TileT).Struct.fields.len;
 
     return struct {
         const Self = @This();
@@ -67,40 +71,12 @@ pub fn Solver(comptime TileT: type) type {
         const BitsetT = std.bit_set.DynamicBitSet;
 
         allocator: std.mem.Allocator = undefined,
-        tileset: []const TileT = undefined,
-
-        possibilities: []BitsetT,
-        neighbors: []const[num_sides]BitsetT,
-
-        pub fn init(alloc: std.mem.Allocator, tiles: []const TileT) Self {
-            // Create an internal data structure for representing adjacencies using Tile data
-            
-            // Return solver
-            return .{
-                .allocator = alloc,
-                .tileset = tiles,
-            };
-        }
-
-        pub fn solve(_: *Self, grid: []usize, dimensions: DimensionT) !void {
-            // Check if provided dimensions fit into provided grid
-            var prod: u32 = 1;
-            inline for (std.meta.fields(DimensionT)) |f| {
-                prod *= @as(u32, @field(dimensions, f.name));
-            }
-            if (prod != grid.len) {
-                return WFCError.InvalidGridSize;
-            }
-
-            
-            return;
-        }
 
         // ==============
         // = Variables
         // ==============
         //
-        // tiles: []TileT
+        // tileset: []TileT
         // Array containing each tile's adjacency data. Index with usize (TileIndex).
         //
         // grid: []TileIndex, grid.len == prod(dimensions)  
@@ -123,7 +99,76 @@ pub fn Solver(comptime TileT: type) type {
         // Basically, each tile has num_sides neighbors, and each of those has a possibility space (hence the bitset) relative to the current tile. 
         // Created by processing the initial tiles array, and by taking account the grid shape. The possibilities are fixed hence const.
         // To be queried to propagate the results of collapsing a tile.
-        //
+        
+        // At init
+        tileset: []const TileT = undefined,
+        neighbors: []const[num_sides]BitsetT = undefined,
+
+        // At solve
+        grid: []TileIndex = undefined,
+        possibilities: []BitsetT = undefined,
+        
+        pub fn init(alloc: std.mem.Allocator, tiles: []const TileT) !Self {
+            // Initialize neighbors array
+            const neighbors: []const[num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
+
+            // Init bitsets in neighbors array
+            for (0..tiles.len) |i| {
+                for (0..num_sides) |j| {
+                    neighbors[i][j] = BitsetT.initEmpty(alloc, tiles.len);
+                }
+            }
+
+            // Set the corresponding bits by iterating over all pairs of tiles, and noting when one side of one corresponds to the opposite side in the other
+            // This is a naive O(n^2) algorithm with redundancy, try finding a more efficient one. (bitset operations, or something else)
+            for (tiles, 0..) |tile, i| {
+                for (tiles, 0..) |other, j| {
+                    for (0..num_sides) |k| {
+                        // Reinterpret tile packed struct as array of u32 to map side to opposite side mathematically
+                        const tile_arr: [num_sides]u32 = @bitCast(tile);
+                        const other_arr: [num_sides]u32 = @bitCast(other);
+
+                        // Modify neighbors[i][k] and neighbors[j][ok] if a match is found]
+                        const ok = @mod(k+(num_sides/2), num_sides);
+                        if (tile_arr[k] == other_arr[ok]) {
+                            neighbors[i][k].set(j);
+                            neighbors[j][ok].set(i);
+                        }
+                    }
+                }
+            }
+
+            // Return solver
+            return .{
+                .allocator = alloc,
+                .tileset = tiles,
+                .neighbor = neighbors,
+            };
+        }
+
+        pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
+            // Check if provided dimensions fit into provided grid
+            var size: u32 = 1;
+            inline for (std.meta.fields(DimensionT)) |f| {
+                size *= @as(u32, @field(dimensions, f.name));
+            }
+            if (size != grid.len) {
+                return WFCError.InvalidGridSize;
+            }
+
+            // Solving algorithm:
+            self.grid = grid;
+
+            while (!isCollapsed()) {
+                iterate();
+            }
+
+            //can be moved down the call stack if required by algorithm logic, later
+            if (isContradiction()) {
+                return WFCError.Contradiction;
+            }
+        }
+
         fn processInitialConstraints() void {}
         fn isCollapsed() bool {return false;}
         fn isContradiction() bool {return false;}
@@ -154,7 +199,7 @@ test "basic solver test" {
         SquareTile{.xpos = 0, .xneg = 0, .ypos = 0, .yneg = 0}
     };
 
-    var solver = Solver(SquareTile).init(allocator, &tiles);
+    var solver = try Solver(SquareTile).init(allocator, &tiles);
 
     var grid = try allocator.alloc(usize, 100);
     defer allocator.free(grid);
