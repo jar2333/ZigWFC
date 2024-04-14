@@ -96,5 +96,9 @@ test "basic solver test" {
     var grid = try allocator.alloc(usize, 100);
     defer allocator.free(grid);
 
+    // Test that it errors out when provided dimensions do not match grid 
+    const err = try solver.solve(grid, .{.x = 5, .y = 10});
+    testing.expect(err == WFCError.InvalidGridSize);
+
     try solver.solve(grid, .{.x = 10, .y = 10});
 }
