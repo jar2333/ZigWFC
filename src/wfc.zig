@@ -53,11 +53,24 @@ pub fn Solver(comptime TileT: type) type {
     };
     const dim: comptime_int = @typeInfo(DimensionT).Struct.fields.len;
 
+    // Only implemented for SquareTile and CubeTile (number of sides in an n-cube is n*2^(n-1))
+    const num_sides: comptime_int = dim*@exp2(dim-1);
+
     return struct {
         const Self = @This();
 
+        const TileIndex = usize;
+        const GridIndex = usize;
+
+        const SideIndex = usize;
+
+        const BitsetT = std.bit_set.DynamicBitSet;
+
         allocator: std.mem.Allocator = undefined,
         tileset: []const TileT = undefined,
+
+        possibilities: []BitsetT,
+        neighbors: []const[num_sides]BitsetT,
 
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT) Self {
             // Create an internal data structure for representing adjacencies using Tile data
@@ -83,22 +96,15 @@ pub fn Solver(comptime TileT: type) type {
             return;
         }
 
-        const TileIndex = usize;
-        const GridIndex = usize;
-
-        const SideIndex = u8;
-
-        const BitsetT = std.bit_set.StaticBitSet(5);
-
-        //
         // ==============
         // = Variables
         // ==============
+        //
         // tiles: []TileT
-        // Array containing each tile's adjacency data. Index with usize.
+        // Array containing each tile's adjacency data. Index with usize (TileIndex).
         //
         // grid: []TileIndex, grid.len == prod(dimensions)  
-        // Flat array that contains indexes to Tiles array. Index with usize. 
+        // Flat array that contains indexes to Tiles array. Index with usize (GridIndex). 
         // This index represents a grid position. Write a helper that will help yield the x,y,z position coordinates.
         // 
         // possibilities: []BitsetT, possibilities.len == grid.len
@@ -107,7 +113,7 @@ pub fn Solver(comptime TileT: type) type {
         // To be modified at each iteration of WFC in one of two ways:
         // 1) Collapse: Make only one tile be possible at this index. Set exactly one bit to 1, the rest to 0.
         // 2) Propagate: Propagate the results of a collapse at the ith grid index using DFS. This means until stack is empty:
-        //   2a) Find all neighbor grid indeces and their associated position in neighbors[i] (make an array n, n.len==neighbors[i].len)
+        //   2a) Find all neighbor grid indeces ordered by their associated bitset in neighbors[i] (make an array n: [num_sides]GridIndex, n.len==neighbors[i].len)
         //   2b) Using the bitset at neighbors[i][j] and the one at possibilities[i] to update the one at possibilities[n[j]]
         //   2c) Add the neighbors key n[j] to the stack if the propagation caused a change to possibilities[n[j]]
         // 
@@ -122,7 +128,7 @@ pub fn Solver(comptime TileT: type) type {
         fn isCollapsed() bool {return false;}
         fn isContradiction() bool {return false;}
         fn iterate() void {}
-        fn getMinEntropyCoordinates() usize {return 0;}
+        fn getMinEntropyCoordinates() GridIndex {return 0;}
         fn collapseAt(p: GridIndex) void {}
         fn propagate(p: GridIndex) void {}
         fn propagateAt(current: GridIndex, neighbor: GridIndex) bool {return false;} //returns true if neighbor's possible tiles decrease
