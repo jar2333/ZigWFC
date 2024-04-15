@@ -18,28 +18,38 @@ const std = @import("std");
 // circular buffers through @bitCast, to efficiently find opposite sides.
 // i.e. The opposite side to tile[i] is tile[i+(num_sides/2) % num_sides]
 
+// The canonical side ordering for the packed structs / ring buffers is:
+// 1) xpos (right)
+// 2) ypos (up)
+// 3) zpos (?)
+// 4) xneg (left)
+// 5) yneg (down)
+// 6) zneg (?)
+
+const LabelT = u32;
+
 pub const SquareTile = packed struct {
-    xpos: u32 = 0,
-    ypos: u32 = 0,
-    xneg: u32 = 0,
-    yneg: u32 = 0
+    xpos: LabelT = 0,
+    ypos: LabelT = 0,
+    xneg: LabelT = 0,
+    yneg: LabelT = 0
 };
 
-const SquareDimensions = struct {
+const SquareDimensions = packed struct {
     x: u32,
     y: u32
 };
 
 pub const CubeTile = packed struct {
-    xpos: u32 = 0,
-    ypos: u32 = 0,
-    zpos: u32 = 0,
-    xneg: u32 = 0,
-    yneg: u32 = 0,
-    zneg: u32 = 0
+    xpos: LabelT = 0,
+    ypos: LabelT = 0,
+    zpos: LabelT = 0,
+    xneg: LabelT = 0,
+    yneg: LabelT = 0,
+    zneg: LabelT = 0
 };
 
-const CubeDimensions = struct {
+const CubeDimensions = packed struct {
     x: u32,
     y: u32,
     z: u32
@@ -49,6 +59,43 @@ pub const WFCError = error{
     InvalidGridSize,
     Contradiction
 };
+
+// O(tiles.len*num_sides) complexity adjacency extraction algorithm:
+// Preliminary breakdown: 
+// Given a tile and a side of that tile, we want to query all other tiles that connect on the opposite side.
+// 
+// The input to the solver is an array of structs, each of which contain labels that denote tile adjacency. 
+// Two sides of different tiles can be adjacent if and only if their labels are equal.
+//
+// Implementation detail:
+// We can efficiently query a side's label and find the opposite side if we can represent the tile labels struct as 
+// a contiguous array of memory, to be treated as a ring buffer.
+//
+// To this end, we use Zig packed structs in the API. This allows the user to comfortably set the labels for a tile's sides.
+// However, it also allows us to guarantee the correct memory layout needed to later use the struct as a ring buffer.
+// We can @bitCast the tile struct to an array of labels. A side can be indexed by k, and the label queried as buffer[k].
+// The index of the opposite side is thus (k+(n/2))%n, where n is the number of sides in a tile.
+
+// To solve the initial problem, we can use a bucketing algorithm, following this reasoning:
+// For k in 0..n:
+//   Given a tile with label A at side k, it connects to tiles which have label A at side (k+(n/2))%n.
+
+// Thus, we can iterate over every tile, and add them to n buckets. Each bucket corresponds to a particular (label, side_index) pair. 
+// For each of a tile's side indeces k with label buffer[k], we add the tile's index i to bucket[buffer[k]][(k+(n/2))%n]. 
+// 
+// After iterating over all tiles once, each possible (label, side_index) pair should index a bucket with every tile whose opposite side index contains that label 
+//
+// In pseudocode:
+// 
+// bucket = hashmap<labeltype, list<tile_index>[n]>
+//
+// for i in  0..tiles.len:
+//   t = tiles[i]
+//   buffer = bitcast<labeltype[n]>(t)
+//   for k in 0..n:
+//     label = buffer[k]
+//     opposite = (k+(n/2))%n
+//     bucket[label][opposite].add(i)
 
 pub fn Solver(comptime TileT: type) type {
     // Comptime constants
@@ -105,35 +152,62 @@ pub fn Solver(comptime TileT: type) type {
         neighbors: []const[num_sides]BitsetT = undefined,
 
         // At solve
+        dimensions: DimensionT = undefined,
         grid: []TileIndex = undefined,
         possibilities: []BitsetT = undefined,
         
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT) !Self {
-            // Initialize neighbors array
+            // Initialize neighbors array and bitsets in neighbors array
             const neighbors: []const[num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
-
-            // Init bitsets in neighbors array
             for (0..tiles.len) |i| {
-                for (0..num_sides) |j| {
-                    neighbors[i][j] = BitsetT.initEmpty(alloc, tiles.len);
+                for (0..num_sides) |k| {
+                    neighbors[i][k] = try BitsetT.initEmpty(alloc, tiles.len);
                 }
             }
 
-            // Set the corresponding bits by iterating over all pairs of tiles, and noting when one side of one corresponds to the opposite side in the other
-            // This is a naive O(n^2) algorithm with redundancy, try finding a more efficient one. (bitset operations, or something else)
-            for (tiles, 0..) |tile, i| {
-                for (tiles, 0..) |other, j| {
-                    for (0..num_sides) |k| {
-                        // Reinterpret tile packed struct as array of u32 to map side to opposite side mathematically
-                        const tile_arr: [num_sides]u32 = @bitCast(tile);
-                        const other_arr: [num_sides]u32 = @bitCast(other);
+            // Use bucketing algorithm to map all (label, side_index) pairs to a list of possible adjacent tiles
+            // Room for optimization: Instead of list, use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
+            const Bucket = std.ArrayList(TileIndex);
+            const HashMap = std.array_hash_map.AutoArrayHashMap(LabelT, [num_sides]Bucket);
+            var buckets = HashMap.init(alloc);
+            defer buckets.deinit();
 
-                        // Modify neighbors[i][k] and neighbors[j][ok] if a match is found]
-                        const ok = @mod(k+(num_sides/2), num_sides);
-                        if (tile_arr[k] == other_arr[ok]) {
-                            neighbors[i][k].set(j);
-                            neighbors[j][ok].set(i);
-                        }
+            for (0..tiles.len) |i| {
+              const buffer: [num_sides]LabelT = @bitCast(tiles[i]);
+              for (0..num_sides) |k| {
+                const label = buffer[k];
+                const opposite_k = (k+(num_sides/2))%num_sides;
+
+                // Lazy initialization of all num_sides adjacency lists
+                if (!buckets.contains(label)) {
+                    try buckets.put(label, [num_sides]Bucket{
+                        Bucket.initCapacity(alloc, tiles.len),
+                        Bucket.initCapacity(alloc, tiles.len),
+                        Bucket.initCapacity(alloc, tiles.len),
+                        Bucket.initCapacity(alloc, tiles.len),
+                    });
+                    for (buckets.getPtr(label).?.*.items) |b| {
+                        defer b.deinit();
+                    }
+                }
+                // Append the tile index i to the adjacency list
+                const ptr: ?*[num_sides]Bucket = buckets.getPtr(label);
+                ptr.?.*[opposite_k].append(i);
+              }
+            }
+
+            // Populate neighbors array by setting bitsets
+            for (tiles, 0..) |tile, i| {
+                // neighbors: []const[num_sides]BitsetT => neighbors[tile_index][side_index].set(neighbor_index)
+                // buckets: std.array_hash_map.AutoArrayHashMap(LabelT, [num_sides]std.ArrayList(TileIndex)) => buckets.getPtr(label).?.*[opposite_side_index][]
+                const buffer: [num_sides]LabelT = @bitCast(tile);
+                for (0..num_sides) |k| {
+                    const label = buffer[k];
+
+                    // For each tile index in the adjacency list, set the corresponding bit in the bitset
+                    const ptr: ?*[num_sides]Bucket = buckets.getPtr(label);
+                    for (ptr.?.*[k].items) |j| {
+                        neighbors[i][k].set(j);
                     }
                 }
             }
@@ -146,11 +220,15 @@ pub fn Solver(comptime TileT: type) type {
             };
         }
 
+        pub fn deinit(_: *Self) void {}
+
         pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
             // Check if provided dimensions fit into provided grid
             var size: u32 = 1;
             inline for (std.meta.fields(DimensionT)) |f| {
-                size *= @as(u32, @field(dimensions, f.name));
+                const v = @as(u32, @field(dimensions, f.name));
+                std.debug.assert(v != 0);
+                size *= v;
             }
             if (size != grid.len) {
                 return WFCError.InvalidGridSize;
@@ -158,6 +236,7 @@ pub fn Solver(comptime TileT: type) type {
 
             // Solving algorithm:
             self.grid = grid;
+            self.dimensions = dimensions;
 
             while (!isCollapsed()) {
                 iterate();
@@ -169,22 +248,99 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        fn processInitialConstraints() void {}
-        fn isCollapsed() bool {return false;}
-        fn isContradiction() bool {return false;}
-        fn iterate() void {}
-        fn getMinEntropyCoordinates() GridIndex {return 0;}
-        fn collapseAt(p: GridIndex) void {}
-        fn propagate(p: GridIndex) void {}
-        fn propagateAt(current: GridIndex, neighbor: GridIndex) bool {return false;} //returns true if neighbor's possible tiles decrease
-        fn getNeighbors(neighbors: [dim]GridIndex, p: GridIndex) void {}
+        fn isCollapsed(_: *Self) bool {
+            return false;
+        }
+        
+        fn isContradiction(_: *Self) bool {
+            return false;
+        }
 
-        fn collapseRandom(tiles: *const BitsetT) TileIndex {return 0;}
+        fn iterate(_: *Self) void {
 
-        fn getAdjacencies(k: GridIndex, d: SideIndex) BitsetT {return BitsetT.init();}
+        }
 
-        fn getInitialPossibleTiles(p: GridIndex) BitsetT {}
-        fn getPossibleTiles(p: GridIndex) *BitsetT {}
+        fn getMinEntropyCoordinates(_: *Self) GridIndex {
+            return 0;
+        }
+
+        fn collapseAt(_: *Self, _: GridIndex) void {
+
+        }
+
+        fn propagate(_: *Self, _: GridIndex) void {
+
+        }
+
+        //returns true if neighbor's possible tiles decrease
+        fn propagateAt(_: *Self, current: GridIndex, neighbor: GridIndex) bool {
+            return false;
+        }
+
+        
+        // Row major indexing formulas:
+        // 2D
+        // i = x + width*y =>
+        // x = i % width;
+        // y = i / width;
+        // 3D: 
+        // i = x + width*y + width*height*z =>
+        // x = i % width;
+        // y = (i / width)%height;
+        // z = i / (width*height)
+        // Note: Do i use a *[dim]GridIndex or a []GridIndex with an assert(len == dim) ? 
+        // TODO: Add bounds checking!!! Hell, I updated the neighbors type to be a slice of optionals
+        fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
+            std.debug.assert(neighbors.len == dim);
+
+            // Gets easily indexable width, height(, depth)
+            const buffer: [dim]u32 = @bitCast(self.dimensions);
+
+            // Treat on case by case basis due to special logic for each grid type
+            switch (TileT) {
+                SquareTile => {
+                    const width = buffer[0];
+
+                    const x = p % width;
+                    const y = p / width;
+
+                    neighbors[0] = (x+1) + width*y; // xpos neighbor
+                    neighbors[1] = x + width*(y+1); // ypos neighbor
+                    neighbors[2] = (x-1) + width*y; // xneg neighbor
+                    neighbors[3] = x + width*(y-1); // yneg neighbor
+                },
+                CubeTile => {
+                    const width  = buffer[0];
+                    const height = buffer[1];
+                    
+                    const x = p % width;
+                    const y = (p / width)%height;
+                    const z = p / (width*height);
+
+                    neighbors[0] = (x+1) + width*y + width*height*z; // xpos neighbor
+                    neighbors[1] = x + width*(y+1) + width*height*z; // ypos neighbor
+                    neighbors[3] = x + width*y + width*height*(z+1); // zpos neighbor
+                    neighbors[4] = (x-1) + width*y + width*height*z; // xpos neighbor
+                    neighbors[5] = x + width*(y-1) + width*height*z; // ypos neighbor
+                    neighbors[6] = x + width*y + width*height*(z-1); // zpos neighbor
+                },
+                else => @compileError("Tile type " ++ @typeName(TileT) ++ " not yet supported.")
+            }
+
+        }
+
+        fn collapseRandom(_: *Self, tiles: *const BitsetT) TileIndex {
+            tiles.set(0);
+            return 0;
+        }
+
+        fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *BitsetT {
+            return &self.neighbors[p][k];
+        }
+
+        fn getPossibleTiles(self: *Self, p: GridIndex) *BitsetT {
+            return &self.possibilities[p];
+        }
 
     };
 }
