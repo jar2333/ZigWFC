@@ -286,8 +286,24 @@ pub fn Solver(comptime TileT: type) type {
             self.collapseRandom(possibilities);
         }
 
-        fn propagate(_: *Self, _: GridIndex) void {
+        fn propagate(self: *Self, p: GridIndex) void {
+            var stack = std.ArrayList(GridIndex);
+            stack.append(p);
 
+            while (stack.len > 0) {
+                const cur = stack.pop();
+
+                var neighbors: [dim]?GridIndex = undefined;
+                self.getNeighbors(neighbors[0..], cur);
+
+                for (neighbors) |opt| {
+                    if (opt) |n| {
+                        if (propagateAt(cur, n)) {
+                            stack.append(n);
+                        }
+                    }
+                }
+            }
         }
 
         //returns true if neighbor's possible tiles decrease
@@ -306,7 +322,8 @@ pub fn Solver(comptime TileT: type) type {
         // x = i % width;
         // y = (i / width)%height;
         // z = i / (width*height)
-        // Note: Do i use a *[dim]?GridIndex or a []?GridIndex with an assert(len == dim) ? 
+        // NOTE: Do i use a *[dim]?GridIndex or a []?GridIndex with an assert(len == dim) ? 
+        // NOTE: Consider moving the nulling to propagate ? 
         fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
             std.debug.assert(neighbors.len == dim);
             const n = self.grid.len;
