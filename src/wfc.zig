@@ -265,8 +265,17 @@ pub fn Solver(comptime TileT: type) type {
             propagate(p);
         }
 
-        fn getMinEntropyCoordinates(_: *Self) GridIndex {
-            return 0;
+        // Naive linear search, can use a memoized result from propagation instead 
+        fn getMinEntropyCoordinates(self: *Self) GridIndex {
+            var min_entropy_position: GridIndex = 0;
+            var min_entropy: usize = self.tileset.len;
+            for (&self.possibilities, 0..) |*p, i|{
+                if (p.*.capacity() < min_entropy and p.*.capacity() > 1) {
+                    min_entropy_position = i;
+                    min_entropy = p.*.capacity();
+                }
+            }
+            return min_entropy_position;
         }
 
         fn collapseAt(_: *Self, _: GridIndex) void {
