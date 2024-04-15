@@ -278,8 +278,10 @@ pub fn Solver(comptime TileT: type) type {
             return min_entropy_position;
         }
 
-        fn collapseAt(_: *Self, _: GridIndex) void {
-
+        // If alternate collapse behaviors are added, modify
+        fn collapseAt(self: *Self, p: GridIndex) void {
+            var possibilities: *BitsetT = self.getPossibleTiles(p);
+            self.collapseRandom(possibilities);
         }
 
         fn propagate(_: *Self, _: GridIndex) void {
@@ -370,7 +372,7 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        fn collapseRandom(_: *Self, tiles: *const BitsetT) TileIndex {
+        fn collapseRandom(_: *Self, tiles: *const BitsetT) void {
             tiles.set(0);
             return 0;
         }
