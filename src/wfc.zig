@@ -151,13 +151,14 @@ pub fn Solver(comptime TileT: type) type {
         // At init
         tileset: []const TileT = undefined,
         neighbors: []const[num_sides]BitsetT = undefined,
+        rand: std.rand.Random = undefined,
 
         // At solve
         dimensions: DimensionT = undefined,
         grid: []TileIndex = undefined,
         possibilities: []BitsetT = undefined,
         
-        pub fn init(alloc: std.mem.Allocator, tiles: []const TileT) !Self {
+        pub fn init(alloc: std.mem.Allocator, tiles: []const TileT, rand: std.rand.Random) !Self {
             // Initialize neighbors array and bitsets in neighbors array
             const neighbors: []const[num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
             for (0..tiles.len) |i| {
@@ -218,6 +219,7 @@ pub fn Solver(comptime TileT: type) type {
                 .allocator = alloc,
                 .tileset = tiles,
                 .neighbor = neighbors,
+                .rand = rand
             };
         }
 
@@ -304,7 +306,7 @@ pub fn Solver(comptime TileT: type) type {
         // x = i % width;
         // y = (i / width)%height;
         // z = i / (width*height)
-        // Note: Do i use a *[dim]GridIndex or a []GridIndex with an assert(len == dim) ? 
+        // Note: Do i use a *[dim]?GridIndex or a []?GridIndex with an assert(len == dim) ? 
         fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
             std.debug.assert(neighbors.len == dim);
             const n = self.grid.len;
@@ -372,9 +374,9 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        fn collapseRandom(_: *Self, tiles: *const BitsetT) void {
-            tiles.set(0);
-            return 0;
+        fn collapseRandom(self: *Self, tiles: *const BitsetT) void {
+            const i = self.rand.uintLessThan(TileIndex, tiles.len);
+            tiles.set(i);
         }
 
         fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *BitsetT {
