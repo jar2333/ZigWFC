@@ -128,6 +128,7 @@ pub fn Solver(comptime TileT: type) type {
         //
         // grid: []TileIndex, grid.len == prod(dimensions)  
         // Flat array that contains indexes to Tiles array. Index with usize (GridIndex). 
+        // For SquareTile and CubeTile tilesets, the grid is interpreted as a row-major square/cube grid with given dimensions.
         // This index represents a grid position. Write a helper that will help yield the x,y,z position coordinates.
         // 
         // possibilities: []BitsetT, possibilities.len == grid.len
@@ -227,7 +228,9 @@ pub fn Solver(comptime TileT: type) type {
             var size: u32 = 1;
             inline for (std.meta.fields(DimensionT)) |f| {
                 const v = @as(u32, @field(dimensions, f.name));
-                std.debug.assert(v != 0);
+                if (v == 0) {
+                    return WFCError.InvalidGridSize;
+                }
                 size *= v;
             }
             if (size != grid.len) {
@@ -256,8 +259,10 @@ pub fn Solver(comptime TileT: type) type {
             return false;
         }
 
-        fn iterate(_: *Self) void {
-
+        fn iterate(self: *Self) void {
+            const p: GridIndex = self.getMinEntropyCoordinates();
+            collapseAt(p);
+            propagate(p);
         }
 
         fn getMinEntropyCoordinates(_: *Self) GridIndex {
@@ -289,44 +294,71 @@ pub fn Solver(comptime TileT: type) type {
         // y = (i / width)%height;
         // z = i / (width*height)
         // Note: Do i use a *[dim]GridIndex or a []GridIndex with an assert(len == dim) ? 
-        // TODO: Add bounds checking!!! Hell, I updated the neighbors type to be a slice of optionals
         fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
             std.debug.assert(neighbors.len == dim);
+            const n = self.grid.len;
 
             // Gets easily indexable width, height(, depth)
             const buffer: [dim]u32 = @bitCast(self.dimensions);
+
+            // Set default null on all neighbors
+            for (0..neighbors.len) |i| {
+                neighbors[i] = null;
+            }
 
             // Treat on case by case basis due to special logic for each grid type
             switch (TileT) {
                 SquareTile => {
                     const width = buffer[0];
 
+                    // p = x + width*y
                     const x = p % width;
                     const y = p / width;
 
-                    neighbors[0] = (x+1) + width*y; // xpos neighbor
-                    neighbors[1] = x + width*(y+1); // ypos neighbor
-                    neighbors[2] = (x-1) + width*y; // xneg neighbor
-                    neighbors[3] = x + width*(y-1); // yneg neighbor
+                    // Unsigned bounds checking
+                    if (p + 1 <= n-1) {
+                        neighbors[0] = (x+1) + width*y; // xpos neighbor
+                    }
+                    if (p + width <= n-1) {
+                        neighbors[1] = x + width*(y+1); // ypos neighbor
+                    }
+                    if (p >= 1) { // p - 1 >= 0
+                        neighbors[2] = (x-1) + width*y; // xneg neighbor
+                    }
+                    if (p >= width) { // p - width >= 0
+                        neighbors[3] = x + width*(y-1); // yneg neighbor
+                    }
                 },
                 CubeTile => {
                     const width  = buffer[0];
                     const height = buffer[1];
                     
+                    // p = x + width*y + width*height*z
                     const x = p % width;
                     const y = (p / width)%height;
                     const z = p / (width*height);
 
-                    neighbors[0] = (x+1) + width*y + width*height*z; // xpos neighbor
-                    neighbors[1] = x + width*(y+1) + width*height*z; // ypos neighbor
-                    neighbors[3] = x + width*y + width*height*(z+1); // zpos neighbor
-                    neighbors[4] = (x-1) + width*y + width*height*z; // xpos neighbor
-                    neighbors[5] = x + width*(y-1) + width*height*z; // ypos neighbor
-                    neighbors[6] = x + width*y + width*height*(z-1); // zpos neighbor
+                    if (p + 1 <= n-1) {
+                        neighbors[0] = (x+1) + width*y + width*height*z; // xpos neighbor
+                    }
+                    if (p + width <= n-1) {
+                        neighbors[1] = x + width*(y+1) + width*height*z; // ypos neighbor
+                    }
+                    if (p + width*height <= n-1) {
+                        neighbors[2] = x + width*y + width*height*(z+1); // zpos neighbor
+                    }
+                    if (p >= 1) { // p - 1 >= 0
+                        neighbors[3] = (x-1) + width*y + width*height*z; // xneg neighbor
+                    }
+                    if (p >= width) { // p - width >= 0
+                        neighbors[4] = x + width*(y-1) + width*height*z; // yneg neighbor
+                    }
+                    if (p >= width*height) { // p - width*height >= 0
+                        neighbors[5] = x + width*y + width*height*(z-1); // zneg neighbor
+                    }
                 },
                 else => @compileError("Tile type " ++ @typeName(TileT) ++ " not yet supported.")
             }
-
         }
 
         fn collapseRandom(_: *Self, tiles: *const BitsetT) TileIndex {
