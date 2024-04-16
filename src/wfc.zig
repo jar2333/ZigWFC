@@ -149,7 +149,7 @@ pub fn Solver(comptime TileT: type) type {
         // At init
         allocator: std.mem.Allocator = undefined,
         tileset: []const TileT = undefined,
-        neighbors: []const[num_sides]BitsetT = undefined,
+        neighbors: [][num_sides]BitsetT = undefined,
         rand: std.rand.Random = undefined,
 
         // At solve
@@ -159,14 +159,25 @@ pub fn Solver(comptime TileT: type) type {
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT, rand: std.rand.Random) !Self {
             // Initialize neighbors array and bitsets in neighbors array
             var neighbors: [][num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
-            defer alloc.free(neighbors);
             for (0..tiles.len) |i| {
                 for (0..num_sides) |k| {
                     neighbors[i][k] = try BitsetT.initEmpty(alloc, tiles.len);
-                    defer neighbors[i][k].deinit();
                 }
             }
 
+            try populateAdjacencies(alloc, neighbors);
+
+            // Return solver
+            return .{
+                .allocator = alloc,
+                .tileset = tiles,
+                .neighbors = neighbors,
+                .rand = rand
+            };
+        }
+
+        // alloc, adjacencies
+        fn populateAdjacencies(_: std.mem.Allocator, _: [][num_sides]BitsetT) !void {
             // // Use bucketing algorithm to map all (label, side_index) pairs to a list of possible adjacent tiles
             // // Room for optimization: Instead of list, use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
             // const Bucket = struct {
@@ -216,17 +227,16 @@ pub fn Solver(comptime TileT: type) type {
             //         }
             //     }
             // }
-
-            // Return solver
-            return .{
-                .allocator = alloc,
-                .tileset = tiles,
-                .neighbors = neighbors,
-                .rand = rand
-            };
         }
 
-        pub fn deinit(_: *Self) void {}
+        pub fn deinit(self: *Self) void {
+            for (0..self.neighbors.len) |i| {
+                for (0..num_sides) |k| {
+                    self.neighbors[i][k].deinit();
+                }
+            }
+            self.allocator.free(self.neighbors);
+        }
 
         pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
             // Check if provided dimensions fit into provided grid
@@ -476,6 +486,7 @@ test "basic solver test" {
     });
     const rand = prng.random();
     var solver = try Solver(SquareTile).init(allocator, &tiles, rand);
+    defer solver.deinit();
 
     var grid = try allocator.alloc(usize, 100);
     defer allocator.free(grid);
