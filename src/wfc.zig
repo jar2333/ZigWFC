@@ -188,7 +188,7 @@ pub fn Solver(comptime TileT: type) type {
                         Bucket.initCapacity(alloc, tiles.len),
                         Bucket.initCapacity(alloc, tiles.len),
                     });
-                    for (buckets.getPtr(label).?.*.items) |b| {
+                    for (buckets.getPtr(label).?.*.items) |*b| {
                         defer b.deinit();
                     }
                 }
@@ -287,18 +287,19 @@ pub fn Solver(comptime TileT: type) type {
         }
 
         fn propagate(self: *Self, p: GridIndex) void {
-            var stack = std.ArrayList(GridIndex);
-            stack.append(p);
+            var stack = std.ArrayList(GridIndex).init(self.allocator);
+            defer stack.deinit();
 
+            stack.append(p);
             while (stack.len > 0) {
                 const cur = stack.pop();
 
                 var neighbors: [dim]?GridIndex = undefined;
                 self.getNeighbors(neighbors[0..], cur);
 
-                for (neighbors) |opt| {
+                for (neighbors, 0..) |opt, k| {
                     if (opt) |n| {
-                        if (propagateAt(cur, n)) {
+                        if (self.propagateAt(cur, n, k)) {
                             stack.append(n);
                         }
                     }
@@ -306,9 +307,40 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        //returns true if neighbor's possible tiles decrease
-        fn propagateAt(_: *Self, current: GridIndex, neighbor: GridIndex) bool {
-            return false;
+        // NOTE: Rephrase explanation
+        // NOTE: Returns true if neighbor's number of possible tiles decreased, false otherwise
+        // NOTE: Following convention of rest of module, k is the index to the side of current tile that is adjacent to neighbor tile
+        fn propagateAt(self: *Self, current: GridIndex, neighbor: GridIndex, k: usize) bool {
+            var neighbor_tiles: *BitsetT = getPossibleTiles(neighbor);
+            var current_tiles: *BitsetT  = getPossibleTiles(current);
+
+            const initial_amount: usize = neighbor_tiles.count();
+
+            // Utilize bit operations on the two possibilities bitsets and the adjacency bitset to decrease neighbor count monotonically
+            // Explanation:
+            //
+            // We need to find the set of all allowed tiles for the neighbor grid position at the kth side of the current grid position.
+            // To do so:
+            // For each tile index i allowed in the possibility space indexed by current (i.e. each index i set to 1 in the bitset getPossibleTiles(current)), 
+            // we find the allowed tile indeces for the neighbor at kth side of the ith tile (i.e. the bitset getAdjacencies(i, k))
+            // Then, we take the union of all those allowed tiles.
+            //
+            // After that, we take the intersection of this set with the set of already allowed tiles at the neighbor.
+            // Since it is an intersection, the count of allowed tiles decreases monotonically.
+
+            var allowed: BitsetT = BitsetT.initEmpty(self.allocator, self.tileset.len);
+            defer allowed.deinit();
+
+            for (0..self.tileset.len) |i| {
+                if (current_tiles.isSet(i)) {
+                    const tile_neighbors: *BitsetT = getAdjacencies(i, k);
+                    allowed.setUnion(tile_neighbors.*); //set union
+                }  
+            }
+
+            neighbor_tiles.setIntersection(allowed); //set intersection
+
+            return neighbor_tiles.count() < initial_amount;
         }
 
         
