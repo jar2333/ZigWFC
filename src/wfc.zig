@@ -158,75 +158,100 @@ pub fn Solver(comptime TileT: type) type {
         
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT, rand: std.rand.Random) !Self {
             // Initialize neighbors array and bitsets in neighbors array
-            var neighbors: [][num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
+            var adjacencies: [][num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
             for (0..tiles.len) |i| {
                 for (0..num_sides) |k| {
-                    neighbors[i][k] = try BitsetT.initEmpty(alloc, tiles.len);
+                    adjacencies[i][k] = try BitsetT.initEmpty(alloc, tiles.len);
                 }
             }
 
-            try populateAdjacencies(alloc, neighbors);
+            try populateAdjacencies(alloc, tiles, adjacencies);
 
             // Return solver
             return .{
                 .allocator = alloc,
                 .tileset = tiles,
-                .neighbors = neighbors,
+                .neighbors = adjacencies,
                 .rand = rand
             };
         }
 
         // alloc, adjacencies
-        fn populateAdjacencies(_: std.mem.Allocator, _: [][num_sides]BitsetT) !void {
-            // // Use bucketing algorithm to map all (label, side_index) pairs to a list of possible adjacent tiles
-            // // Room for optimization: Instead of list, use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
-            // const Bucket = struct {
-            //     items: []TileIndex,
-            //     count: usize = 0,
-            // };
-            // const HashMap = std.array_hash_map.AutoArrayHashMap(LabelT, [num_sides]Bucket);
-            // var buckets = HashMap.init(alloc);
-            // defer buckets.deinit();
+        fn populateAdjacencies(alloc: std.mem.Allocator, tiles: []const TileT, adjacencies: [][num_sides]BitsetT) !void {
+            // Use bucketing algorithm to map all (label, side_index) pairs to a list of possible adjacent tiles
+            // NOTE: Instead of list, use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
+            const Bucket = struct {
+                items: []TileIndex = undefined,
+                count: usize = 0,
 
-            // for (0..tiles.len) |i| {
-            //   const buffer: [num_sides]LabelT = @bitCast(tiles[i]);
-            //   for (0..num_sides) |k| {
-            //     const label = buffer[k];
-            //     const opposite_k = (k+(num_sides/2))%num_sides;
+                pub fn add(self: *@This(), i: TileIndex) void {
+                    self.items[self.count] = i;
+                    self.count += 1;
+                } 
+            };
 
-            //     // Lazy initialization of all num_sides adjacency lists
-            //     if (!buckets.contains(label)) {
-            //         var val: [num_sides]Bucket = undefined;
-            //         for (0..num_sides) |b| {
-            //             val[b] = Bucket{.items = try alloc.alloc(TileIndex, tiles.len)};
-            //             defer alloc.free(val[b].items);
-            //         }
-            //         try buckets.put(label, val);
-            //     }
-            //     // Append the tile index i to the adjacency list
-            //     const slice: []Bucket = buckets.getPtr(label).?;
-            //     const b: *Bucket = &slice[opposite_k];
-                
-            //     b.items[b.count] = i;
-            //     b.count += 1;
-            //   }
-            // }
+            var buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) = undefined;
+            for (0..num_sides) |k| {
+                buckets[k] = std.AutoHashMap(LabelT, Bucket).init(alloc);
+                defer buckets[k].deinit();
+            }
 
-            // // Populate neighbors array by setting bitsets
-            // for (tiles, 0..) |tile, i| {
-            //     // neighbors: []const[num_sides]BitsetT => neighbors[tile_index][side_index].set(neighbor_index)
-            //     // buckets: std.array_hash_map.AutoArrayHashMap(LabelT, [num_sides]std.ArrayList(TileIndex)) => buckets.getPtr(label).?.*[opposite_side_index][]
-            //     const buffer: [num_sides]LabelT = @bitCast(tile);
-            //     for (0..num_sides) |k| {
-            //         const label = buffer[k];
+            for (0..tiles.len) |i| {
+              const buffer: [num_sides]LabelT = toBuffer(tiles[i]);
+              for (0..num_sides) |k| {
+                const label: LabelT = buffer[k];
+                const opposite_k = (k+(num_sides/2))%num_sides;
 
-            //         // For each tile index in the adjacency list, set the corresponding bit in the bitset
-            //         const ptr: ?*[num_sides]Bucket = buckets.getPtr(label);
-            //         for (ptr.?.*[k].items) |j| {
-            //             neighbors[i][k].set(j);
-            //         }
-            //     }
-            // }
+                // Lazy initialization of adjacency lists
+                if (!buckets[opposite_k].contains(label)) {
+                    const allocated: []TileIndex = try alloc.alloc(TileIndex, tiles.len);
+                    defer alloc.free(allocated);
+                    try buckets[opposite_k].put(label, Bucket{
+                        .items = allocated
+                    });
+                }
+                // Append the tile index i to the adjacency list
+                buckets[opposite_k].getPtr(label).?.add(i);
+              }
+            }
+
+            // Populate neighbors array by setting bitsets
+            for (tiles, 0..) |tile, i| {
+                // neighbors: []const[num_sides]BitsetT => adjacencies[tile_index][side_index].set(neighbor_index)
+                // buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) => buckets[opposite_side_index].getPtr(label).?
+                const buffer: [num_sides]LabelT = toBuffer(tile);
+                for (0..num_sides) |k| {
+                    const label = buffer[k];
+
+                    // For each tile index in the adjacency list, set the corresponding bit in the bitset
+                    const opt: ?*Bucket = buckets[k].getPtr(label);
+                    if (opt) |ptr| {
+                        // Only iterates through a bucket if it exists...
+                        for (0..ptr.count) |index| {
+                            adjacencies[i][k].set(ptr.items[index]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // I thought I could use a bitcast, but it's being weird, so I'll use reflection for now.
+        fn toBuffer(t: TileT) [num_sides]LabelT {
+            switch (TileT) {
+                SquareTile => {
+                    const casted = @as(SquareTile, t);
+                    return [num_sides]LabelT{
+                        casted.xpos, casted.ypos, casted.xneg, casted.yneg
+                    };
+                },
+                CubeTile => {
+                    const casted = @as(CubeTile, t);
+                    return [num_sides]LabelT{
+                        casted.xpos, casted.ypos, casted.zpos, casted.xneg, casted.yneg, casted.zneg
+                    };
+                },
+                else => @compileError("Tile type " ++ @typeName(TileT) ++ " not supported.")
+            }
         }
 
         pub fn deinit(self: *Self) void {
