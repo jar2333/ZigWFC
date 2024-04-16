@@ -352,13 +352,12 @@ pub fn Solver(comptime TileT: type) type {
             var allowed: BitsetT = try BitsetT.initEmpty(self.allocator, self.tileset.len);
             defer allowed.deinit();
 
-            for (0..self.tileset.len) |i| {
+            for (0..current_tiles.capacity()) |i| {
                 if (current_tiles.isSet(i)) {
                     const tile_neighbors: *const BitsetT = self.getAdjacencies(i, k);
                     allowed.setUnion(tile_neighbors.*); //set union
                 }  
             }
-
             neighbor_tiles.setIntersection(allowed); //set intersection
 
             return neighbor_tiles.count() < initial_amount;
