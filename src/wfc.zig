@@ -178,8 +178,8 @@ pub fn Solver(comptime TileT: type) type {
 
         // alloc, adjacencies
         fn populateAdjacencies(alloc: std.mem.Allocator, tiles: []const TileT, adjacencies: [][num_sides]BitsetT) !void {
-            // Use bucketing algorithm to map all (label, side_index) pairs to a list of possible adjacent tiles
-            // NOTE: Instead of list, use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
+            // Use bucketing algorithm to map all (side_index, label) pairs to a list of possible adjacent tiles
+            // NOTE: Instead of list, we use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
             const Bucket = struct {
                 items: []TileIndex = undefined,
                 count: usize = 0,
@@ -189,69 +189,59 @@ pub fn Solver(comptime TileT: type) type {
                     self.count += 1;
                 } 
             };
-
-            var buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) = undefined;
-            for (0..num_sides) |k| {
-                buckets[k] = std.AutoHashMap(LabelT, Bucket).init(alloc);
-                defer buckets[k].deinit();
+            const HashMap = std.AutoHashMap(LabelT, Bucket);
+            var buckets: [num_sides]HashMap = [_]HashMap{HashMap.init(alloc)} ** num_sides;
+            for (&buckets) |*b| {
+                defer b.deinit();
             }
 
+            // For every tile, iterate through its sides, and insert the tile to the bucket corresponding to the opposite side and same label
             for (0..tiles.len) |i| {
               const buffer: [num_sides]LabelT = toBuffer(tiles[i]);
+
               for (0..num_sides) |k| {
                 const label: LabelT = buffer[k];
                 const opposite_k = (k+(num_sides/2))%num_sides;
+                std.debug.assert(0 <= opposite_k and opposite_k <= num_sides-1);
 
-                // Lazy initialization of adjacency lists
-                if (!buckets[opposite_k].contains(label)) {
-                    const allocated: []TileIndex = try alloc.alloc(TileIndex, tiles.len);
-                    defer alloc.free(allocated);
+                // Lazy initialization of adjacency lists (buckets)
+                var v = try buckets[opposite_k].getOrPut(label);
+                if (!v.found_existing) {
+                    // Initialize the bucket at the given side opposite_k if not already there
+                    const items: []TileIndex = try alloc.alloc(TileIndex, tiles.len);
                     try buckets[opposite_k].put(label, Bucket{
-                        .items = allocated
+                        .items = items,
                     });
+                    defer alloc.free(items);
                 }
+
                 // Append the tile index i to the adjacency list
-                buckets[opposite_k].getPtr(label).?.add(i);
+                v.value_ptr.add(i);
               }
             }
 
             // Populate neighbors array by setting bitsets
-            for (tiles, 0..) |tile, i| {
-                // neighbors: []const[num_sides]BitsetT => adjacencies[tile_index][side_index].set(neighbor_index)
-                // buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) => buckets[opposite_side_index].getPtr(label).?
+            for (tiles, 0..) |tile, tile_index| {
+                // adjacencies: []const[num_sides]BitsetT => adjacencies[tile_index][side_index].set(adjacent_tile_index)
+                // buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) => buckets[side_index].getPtr(label).?
                 const buffer: [num_sides]LabelT = toBuffer(tile);
+
                 for (0..num_sides) |k| {
                     const label = buffer[k];
 
                     // For each tile index in the adjacency list, set the corresponding bit in the bitset
                     const opt: ?*Bucket = buckets[k].getPtr(label);
                     if (opt) |ptr| {
-                        // Only iterates through a bucket if it exists...
-                        for (0..ptr.count) |index| {
-                            adjacencies[i][k].set(ptr.items[index]);
+                        for (0..ptr.count) |adjacent_tile_index| {
+                            adjacencies[tile_index][k].set(ptr.items[adjacent_tile_index]);
                         }
                     }
                 }
             }
         }
 
-        // I thought I could use a bitcast, but it's being weird, so I'll use reflection for now.
         fn toBuffer(t: TileT) [num_sides]LabelT {
-            switch (TileT) {
-                SquareTile => {
-                    const casted = @as(SquareTile, t);
-                    return [num_sides]LabelT{
-                        casted.xpos, casted.ypos, casted.xneg, casted.yneg
-                    };
-                },
-                CubeTile => {
-                    const casted = @as(CubeTile, t);
-                    return [num_sides]LabelT{
-                        casted.xpos, casted.ypos, casted.zpos, casted.xneg, casted.yneg, casted.zneg
-                    };
-                },
-                else => @compileError("Tile type " ++ @typeName(TileT) ++ " not supported.")
-            }
+            return @bitCast(t);
         }
 
         pub fn deinit(self: *Self) void {
@@ -352,10 +342,7 @@ pub fn Solver(comptime TileT: type) type {
             while (stack.items.len > 0) {
                 const cur = stack.pop();
 
-                var neighbors: [num_sides]?GridIndex = undefined;
-                for (0..num_sides) |i| {
-                    neighbors[i] = null;
-                }
+                var neighbors: [num_sides]?GridIndex = [_]?GridIndex{null} ** num_sides;
                 self.getNeighbors(neighbors[0..num_sides], cur);
 
                 for (neighbors, 0..) |opt, k| {
@@ -501,7 +488,7 @@ test "basic solver test" {
     const allocator = test_allocator;
 
     const tiles = [_]SquareTile{
-        SquareTile{.xpos = 0, .xneg = 0, .ypos = 0, .yneg = 0}
+        SquareTile{.xpos = 1, .xneg = 1, .ypos = 1, .yneg = 1}
     };
 
     var prng = std.rand.DefaultPrng.init(blk: {
