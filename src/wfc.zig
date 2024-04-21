@@ -165,9 +165,13 @@ pub fn Solver(comptime TileT: type) type {
                 }
             }
 
+            std.debug.print("Unpopulated adjacencies:\n", .{});
             printAdjacencies(adjacencies);
 
-            // try populateAdjacencies(alloc, tiles, adjacencies);
+            try populateAdjacencies(alloc, tiles, adjacencies);
+
+            std.debug.print("Populated adjacencies:\n", .{});
+            printAdjacencies(adjacencies);
 
             // Return solver
             return .{
@@ -192,35 +196,43 @@ pub fn Solver(comptime TileT: type) type {
                 } 
             };
             const HashMap = std.AutoHashMap(LabelT, Bucket);
+
             var buckets: [num_sides]HashMap = [_]HashMap{HashMap.init(alloc)} ** num_sides;
-            for (&buckets) |*b| {
-                defer b.deinit();
-            }
+            defer for (&buckets) |*hash| {
+                hash.deinit();
+            };
 
             // For every tile, iterate through its sides, and insert the tile to the bucket corresponding to the opposite side and same label
-            for (0..tiles.len) |i| {
-              const buffer: [num_sides]LabelT = toBuffer(tiles[i]);
+            for (0..tiles.len) |tile_index| {
+              const buffer: [num_sides]LabelT = toBuffer(tiles[tile_index]);
 
               for (0..num_sides) |k| {
                 const label: LabelT = buffer[k];
                 const opposite_k = (k+(num_sides/2))%num_sides;
                 std.debug.assert(0 <= opposite_k and opposite_k <= num_sides-1);
 
-                // Lazy initialization of adjacency lists (buckets)
-                var v = try buckets[opposite_k].getOrPut(label);
+                const hash: *HashMap = &buckets[opposite_k];
+                var v = try hash.getOrPut(label);
+
+                // Lazy intitialization: Initialize the bucket at the given side opposite_k if not already there
                 if (!v.found_existing) {
-                    // Initialize the bucket at the given side opposite_k if not already there
-                    const items: []TileIndex = try alloc.alloc(TileIndex, tiles.len);
-                    try buckets[opposite_k].put(label, Bucket{
-                        .items = items,
-                    });
-                    defer alloc.free(items);
+                    v.value_ptr.* = Bucket{
+                        .items = try alloc.alloc(TileIndex, tiles.len),
+                    };
                 }
 
                 // Append the tile index i to the adjacency list
-                v.value_ptr.add(i);
+                v.value_ptr.add(tile_index);
               }
             }
+
+            // Deinitialize every bucket as cleanup
+            defer for (&buckets) |*hash| {
+                var it = hash.valueIterator();
+                while (it.next()) |v| {
+                    alloc.free(v.items);
+                }
+            };
 
             // Populate neighbors array by setting bitsets
             for (tiles, 0..) |tile, tile_index| {
