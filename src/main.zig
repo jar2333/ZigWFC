@@ -17,9 +17,9 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const tiles = [_]wfc.SquareTile{
-        wfc.SquareTile{.xpos = 1, .xneg = 1, .ypos = 1, .yneg = 1},
-        wfc.SquareTile{.xpos = 1, .xneg = 3, .ypos = 2, .yneg = 2},
-        wfc.SquareTile{.xpos = 3, .xneg = 3, .ypos = 3, .yneg = 3},
+        wfc.SquareTile{.xpos = 1, .ypos = 1, .xneg = 1, .yneg = 1},
+        wfc.SquareTile{.xpos = 1, .ypos = 2, .xneg = 3, .yneg = 2},
+        wfc.SquareTile{.xpos = 3, .ypos = 3, .xneg = 3, .yneg = 3},
     };
 
     var prng = std.rand.DefaultPrng.init(blk: {

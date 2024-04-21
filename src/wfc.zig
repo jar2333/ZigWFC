@@ -165,13 +165,13 @@ pub fn Solver(comptime TileT: type) type {
                 }
             }
 
-            std.debug.print("Unpopulated adjacencies:\n", .{});
-            printAdjacencies(adjacencies);
+            // std.debug.print("Unpopulated adjacencies:\n", .{});
+            // printAdjacencies(adjacencies);
 
             try populateAdjacencies(alloc, tiles, adjacencies);
 
-            std.debug.print("Populated adjacencies:\n", .{});
-            printAdjacencies(adjacencies);
+            // std.debug.print("Populated adjacencies:\n", .{});
+            // printAdjacencies(adjacencies);
 
             // Return solver
             return .{
@@ -298,6 +298,7 @@ pub fn Solver(comptime TileT: type) type {
             };
 
             while (!self.isCollapsed(possibilities)) {
+                std.debug.print("iterating!\n", .{});
                 try self.iterate(possibilities);
             }
 
@@ -335,40 +336,39 @@ pub fn Solver(comptime TileT: type) type {
 
         fn iterate(self: *Self, possibilities: []BitsetT) !void {
             const p: GridIndex = self.getMinEntropyCoordinates(possibilities);
-            self.collapseAt(p, possibilities);
+            try self.collapseAt(p, possibilities);
             try self.propagate(p, possibilities);
         }
 
         // TODO: Explain...
+        // NOTE: Implementation detail: among all positions with same entropy, the one with lowest index is chosen.
         // NOTE: Naive linear search, can use a memoized result from propagation instead 
         fn getMinEntropyCoordinates(self: *Self, possibilities: []BitsetT) GridIndex {
-            var min_entropy_position: ?GridIndex = null;
+            var min_entropy_position: GridIndex = 0;
             var min_entropy: usize = self.tileset.len;
             
             for (possibilities, 0..) |*p, i|{
-                if (p.capacity() < min_entropy and p.capacity() > 1) {
+                if (p.count() < min_entropy and p.count() > 1) {
                     min_entropy_position = i;
-                    min_entropy = p.capacity();
+                    min_entropy = p.count();
                 }
             }
 
-            if (min_entropy_position) |pos| {
-                return pos;
-            }
-            return self.rand.uintLessThan(GridIndex, self.grid.len);
+            return min_entropy_position;
+            // return self.rand.uintLessThan(GridIndex, self.grid.len);
         }
 
         // NOTE: If alternate collapse behaviors are later supported, modify this function
-        fn collapseAt(self: *Self, p: GridIndex, possibilities: []BitsetT) void {
-            std.debug.print("collapsing at {}\n", .{p});
+        fn collapseAt(self: *Self, p: GridIndex, possibilities: []BitsetT) !void {
+            // std.debug.print("collapsing at {}\n", .{p});
 
             const b: *BitsetT = &possibilities[p];
-            std.debug.print("bitset before collapse:\n", .{});
-            printBitset(b);
+            // std.debug.print("bitset before collapse:\n", .{});
+            // printBitset(b);
 
-            self.collapseRandom(b);
-            std.debug.print("bitset after collapse:\n", .{});
-            printBitset(b);
+            try self.collapseRandom(b);
+            // std.debug.print("bitset after collapse:\n", .{});
+            // printBitset(b);
         }
 
         fn propagate(self: *Self, p: GridIndex, possibilities: []BitsetT) !void {
@@ -407,11 +407,17 @@ pub fn Solver(comptime TileT: type) type {
         // NOTE: Returns true if neighbor's number of possible tiles decreased, false otherwise
         // NOTE: Following convention of rest of module, k is the index to the side of current tile that is adjacent to neighbor tile
         fn propagateAt(self: *Self, current: GridIndex, neighbor: GridIndex, k: usize, possibilities: []BitsetT) !bool {
+            // std.debug.print("Propagating to neighbor {} at side {} from current {}\n", .{neighbor, k, current});
             var neighbor_tiles: *BitsetT = &possibilities[neighbor];
             var current_tiles: *BitsetT  = &possibilities[current];
 
-            const initial_amount: usize = neighbor_tiles.count();
+            // std.debug.print("Current bitset:\n", .{});
+            // printBitset(current_tiles);
 
+            // std.debug.print("Neighbor bitset:\n", .{});
+            // printBitset(neighbor_tiles);
+
+            const initial_amount: usize = neighbor_tiles.count();
 
             var allowed: BitsetT = try BitsetT.initEmpty(self.allocator, self.tileset.len);
             defer allowed.deinit();
@@ -422,8 +428,16 @@ pub fn Solver(comptime TileT: type) type {
                     allowed.setUnion(tile_neighbors.*); //set union
                 }  
             }
+
+            // std.debug.print("Allowed bitset:\n", .{});
+            // printBitset(&allowed);
+
             neighbor_tiles.setIntersection(allowed); //set intersection
 
+            // std.debug.print("Neighbor bitset after constraining:\n", .{});
+            // printBitset(neighbor_tiles);
+
+            // std.debug.print("Did constrain? {}\n", .{neighbor_tiles.count() < initial_amount});
             return neighbor_tiles.count() < initial_amount;
         }
         
@@ -500,13 +514,24 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        fn collapseRandom(self: *Self, tiles: *BitsetT) void {
-            const i = self.rand.uintLessThan(TileIndex, self.tileset.len);
-            // Unset all
+        // 
+        fn collapseRandom(self: *Self, tiles: *BitsetT) !void {
+            // We need to get indeces for tiles that are possible
+            var indeces = std.ArrayList(usize).init(self.allocator);
+            defer indeces.deinit();
+
+
+            // Fill in arr, and unset all in same pass
             for (0..tiles.capacity()) |j| {
-                tiles.unset(j);
+                if (tiles.isSet(j)) {
+                    try indeces.append(j);
+                    tiles.unset(j);
+                }
             }
-            tiles.set(i);
+
+            // Set the tile which corresponds to a random index among possible indeces 
+            const i = self.rand.uintLessThan(TileIndex, indeces.items.len);
+            tiles.set(indeces.items[i]);
         }
 
         fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
