@@ -117,9 +117,9 @@ pub fn Solver(comptime TileT: type) type {
 
         const BitsetT = std.bit_set.DynamicBitSet;
 
-        // ==============
-        // = Variables
-        // ==============
+        // ===================
+        // = Member Variables
+        // ===================
         //
         // tileset: []TileT
         // Array containing each tile's adjacency data. Index with usize (TileIndex).
@@ -130,34 +130,39 @@ pub fn Solver(comptime TileT: type) type {
         // This index represents a grid position. Write a helper that will help yield the x,y,z position coordinates.
         // 
         // possibilities: []BitsetT, possibilities.len == grid.len
-        // Array which corresponds to grid array (grid[i] -> neighbors[i]). It is an array of bitsets.
+        // Array which corresponds to grid array (grid[i] -> adjacencies[i]). It is an array of bitsets.
         // The bitset at possibilities[i] corresponds to the set of possible tiles at tile index i.
         // To be modified at each iteration of WFC in one of two ways:
         // 1) Collapse: Make only one tile be possible at this index. Set exactly one bit to 1, the rest to 0.
         // 2) Propagate: Propagate the results of a collapse at the ith grid index using DFS. This means until stack is empty:
-        //   2a) Find all neighbor grid indeces ordered by their associated bitset in neighbors[i] (make an array n: [num_sides]GridIndex, n.len==neighbors[i].len)
-        //   2b) Using the bitset at neighbors[i][j] and the one at possibilities[i] to update the one at possibilities[n[j]]
-        //   2c) Add the neighbors key n[j] to the stack if the propagation caused a change to possibilities[n[j]]
+        //   2a) Find all neighbor grid indeces ordered by their associated bitset in adjacencies[i] (make an array n: [num_sides]GridIndex, n.len==adjacencies[i].len)
+        //   2b) Using the bitset at adjacencies[i][j] and the one at possibilities[i] to update the one at possibilities[n[j]]
+        //   2c) Add the adjacencies key n[j] to the stack if the propagation caused a change to possibilities[n[j]]
         // 
-        // neighbors: [][num_sides]const BitsetT, neighbors.len == tiles.len, bitset.capacity == tiles.len 
-        // Array which corresponds to tiles array (tiles[i] -> neighbors[i]). It is an array of arrays of bitsets. 
+        // adjacencies: [][num_sides]const BitsetT, adjacencies.len == tiles.len, bitset.capacity == tiles.len 
+        // Array which corresponds to tiles array (tiles[i] -> adjacencies[i]). It is an array of arrays of bitsets. 
         // The bitset[i][j] corresponds to the set of possible tiles relative to tile i at neighbor tile j. The number of possible tiles is the length of tiles array.
-        // Basically, each tile has num_sides neighbors, and each of those has a possibility space (hence the bitset) relative to the current tile. 
+        // Basically, each tile has num_sides adjacencies, and each of those has a possibility space (hence the bitset) relative to the current tile. 
         // Created by processing the initial tiles array, and by taking account the grid shape. The possibilities are fixed hence const.
         // To be queried to propagate the results of collapsing a tile.
         
         // At init
         allocator: std.mem.Allocator = undefined,
         tileset: []const TileT = undefined,
-        neighbors: [][num_sides]BitsetT = undefined,
+        adjacencies: [][num_sides]BitsetT = undefined,
         rand: std.rand.Random = undefined,
 
         // At solve
         dimensions: DimensionT = undefined,
         grid: []TileIndex = undefined,
         
+
+        /// ==================
+        /// = Initialization
+        /// ==================
+
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT, rand: std.rand.Random) !Self {
-            // Initialize neighbors array and bitsets in neighbors array
+            // Initialize adjacencies array and bitsets in adjacencies array
             var adjacencies: [][num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
             for (0..tiles.len) |i| {
                 for (0..num_sides) |k| {
@@ -167,17 +172,17 @@ pub fn Solver(comptime TileT: type) type {
 
             // std.debug.print("Unpopulated adjacencies:\n", .{});
             // printAdjacencies(adjacencies);
-
             try populateAdjacencies(alloc, tiles, adjacencies);
-
             // std.debug.print("Populated adjacencies:\n", .{});
             // printAdjacencies(adjacencies);
+
+
 
             // Return solver
             return .{
                 .allocator = alloc,
                 .tileset = tiles,
-                .neighbors = adjacencies,
+                .adjacencies = adjacencies,
                 .rand = rand
             };
         }
@@ -234,7 +239,7 @@ pub fn Solver(comptime TileT: type) type {
                 }
             };
 
-            // Populate neighbors array by setting bitsets
+            // Populate adjacencies array by setting bitsets
             for (tiles, 0..) |tile, tile_index| {
                 // adjacencies: []const[num_sides]BitsetT => adjacencies[tile_index][side_index].set(adjacent_tile_index)
                 // buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) => buckets[side_index].getPtr(label).?
@@ -258,13 +263,17 @@ pub fn Solver(comptime TileT: type) type {
             return @bitCast(t);
         }
 
+        /// ==================
+        /// = Public API
+        /// ==================
+
         pub fn deinit(self: *Self) void {
-            for (0..self.neighbors.len) |i| {
+            for (0..self.adjacencies.len) |i| {
                 for (0..num_sides) |k| {
-                    self.neighbors[i][k].deinit();
+                    self.adjacencies[i][k].deinit();
                 }
             }
-            self.allocator.free(self.neighbors);
+            self.allocator.free(self.adjacencies);
         }
 
         pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
@@ -313,6 +322,10 @@ pub fn Solver(comptime TileT: type) type {
             }
 
         }
+
+        /// ========================
+        /// = Private Helpers: WFC
+        /// ========================
 
         // Check if all positions have at most 1 possibility
         fn isCollapsed(_: *Self, possibilities: []BitsetT) bool {
@@ -535,12 +548,12 @@ pub fn Solver(comptime TileT: type) type {
         }
 
         fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
-            return &self.neighbors[p][k];
+            return &self.adjacencies[p][k];
         }
 
-        ///
-        /// Debug methods
-        /// 
+        /// =================
+        /// = Debug methods
+        /// =================
         
         fn printAdjacencies(adjacencies: [][num_sides]BitsetT) void {
             for (adjacencies, 0..) |*arr, i| {
