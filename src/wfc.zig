@@ -301,13 +301,19 @@ pub fn Solver(comptime TileT: type) type {
                 try self.iterate(possibilities);
             }
 
-            //can be moved down the call stack if required by algorithm logic, later
             if (self.isContradiction(possibilities)) {
                 return WFCError.Contradiction;
             }
+
+            // Set all the positions to their solved values
+            // Should not panic, since we confirmed all positions have at least 1 possibility
+            for (grid, 0..) |*p, i| {
+                p.* = possibilities[i].findFirstSet().?;
+            }
+
         }
 
-        // Check if at least one position has more than 1 possibility
+        // Check if all positions have at most 1 possibility
         fn isCollapsed(_: *Self, possibilities: []BitsetT) bool {
             for (possibilities) |*b| {
                 if (b.count() > 1) {
@@ -317,7 +323,7 @@ pub fn Solver(comptime TileT: type) type {
             return true;
         }
         
-        // Check if all positions have at least 1 possibility
+        // Check if some positions have 0 possibilities
         fn isContradiction(_: *Self, possibilities: []BitsetT) bool {
             for (possibilities) |*b| {
                 if (b.count() == 0) {
@@ -333,17 +339,23 @@ pub fn Solver(comptime TileT: type) type {
             try self.propagate(p, possibilities);
         }
 
+        // TODO: Explain...
         // NOTE: Naive linear search, can use a memoized result from propagation instead 
         fn getMinEntropyCoordinates(self: *Self, possibilities: []BitsetT) GridIndex {
-            var min_entropy_position: GridIndex = 0;
+            var min_entropy_position: ?GridIndex = null;
             var min_entropy: usize = self.tileset.len;
+            
             for (possibilities, 0..) |*p, i|{
                 if (p.capacity() < min_entropy and p.capacity() > 1) {
                     min_entropy_position = i;
                     min_entropy = p.capacity();
                 }
             }
-            return min_entropy_position;
+
+            if (min_entropy_position) |pos| {
+                return pos;
+            }
+            return self.rand.uintLessThan(GridIndex, self.grid.len);
         }
 
         // NOTE: If alternate collapse behaviors are later supported, modify this function
@@ -438,51 +450,50 @@ pub fn Solver(comptime TileT: type) type {
             switch (TileT) {
                 SquareTile => {
                     const width = buffer[0];
-
-                    // p = x + width*y
-                    const x = p % width;
-                    const y = p / width;
+                    // p = x + width*y =>
+                    // x = p % width
+                    // y = p / width
 
                     // Unsigned bounds checking
                     if (p + 1 <= n-1) {
-                        neighbors[0] = (x+1) + width*y; // xpos neighbor
+                        neighbors[0] = p + 1;     // xpos neighbor = (x+1) + width*y
                     }
                     if (p + width <= n-1) {
-                        neighbors[1] = x + width*(y+1); // ypos neighbor
+                        neighbors[1] = p + width; // ypos neighbor = x + width*(y+1)
                     }
                     if (p >= 1) { // p - 1 >= 0
-                        neighbors[2] = (x-1) + width*y; // xneg neighbor
+                        neighbors[2] = p - 1;     // xneg neighbor = (x-1) + width*y
                     }
                     if (p >= width) { // p - width >= 0
-                        neighbors[3] = x + width*(y-1); // yneg neighbor
+                        neighbors[3] = p - width; // yneg neighbor = x + width*(y-1)
                     }
                 },
                 CubeTile => {
                     const width  = buffer[0];
                     const height = buffer[1];
-                    
-                    // p = x + width*y + width*height*z
-                    const x = p % width;
-                    const y = (p / width)%height;
-                    const z = p / (width*height);
+                    // p = x + width*y + width*height*z =>
+                    // x = p % width
+                    // y = (p / width)%height
+                    // z = p / (width*height)
 
+                    // Unsigned bounds checking
                     if (p + 1 <= n-1) {
-                        neighbors[0] = (x+1) + width*y + width*height*z; // xpos neighbor
+                        neighbors[0] = p + 1;            // xpos neighbor = (x+1) + width*y + width*height*z
                     }
                     if (p + width <= n-1) {
-                        neighbors[1] = x + width*(y+1) + width*height*z; // ypos neighbor
+                        neighbors[1] = p + width;        // ypos neighbor = x + width*(y+1) + width*height*z
                     }
                     if (p + width*height <= n-1) {
-                        neighbors[2] = x + width*y + width*height*(z+1); // zpos neighbor
+                        neighbors[2] = p + width*height; // zpos neighbor = x + width*y + width*height*(z+1)
                     }
                     if (p >= 1) { // p - 1 >= 0
-                        neighbors[3] = (x-1) + width*y + width*height*z; // xneg neighbor
+                        neighbors[3] = p - 1;            // xneg neighbor = (x-1) + width*y + width*height*z
                     }
                     if (p >= width) { // p - width >= 0
-                        neighbors[4] = x + width*(y-1) + width*height*z; // yneg neighbor
+                        neighbors[4] = p - width;        // yneg neighbor = x + width*(y-1) + width*height*z
                     }
                     if (p >= width*height) { // p - width*height >= 0
-                        neighbors[5] = x + width*y + width*height*(z-1); // zneg neighbor
+                        neighbors[5] = p - width*height; // zneg neighbor = x + width*y + width*height*(z-1)
                     }
                 },
                 else => @compileError("Tile type " ++ @typeName(TileT) ++ " not yet supported.")
