@@ -153,6 +153,7 @@ pub fn Solver(comptime TileT: type) type {
         rand: std.rand.Random = undefined,
 
         // At solve
+        possibilities: []BitsetT = undefined,
         dimensions: DimensionT = undefined,
         grid: []TileIndex = undefined,
         
@@ -170,13 +171,9 @@ pub fn Solver(comptime TileT: type) type {
                 }
             }
 
-            // std.debug.print("Unpopulated adjacencies:\n", .{});
-            // printAdjacencies(adjacencies);
             try populateAdjacencies(alloc, tiles, adjacencies);
             // std.debug.print("Populated adjacencies:\n", .{});
             // printAdjacencies(adjacencies);
-
-
 
             // Return solver
             return .{
@@ -187,7 +184,6 @@ pub fn Solver(comptime TileT: type) type {
             };
         }
 
-        // alloc, adjacencies
         fn populateAdjacencies(alloc: std.mem.Allocator, tiles: []const TileT, adjacencies: [][num_sides]BitsetT) !void {
             // Use bucketing algorithm to map all (side_index, label) pairs to a list of possible adjacent tiles
             // NOTE: Instead of list, we use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
@@ -259,10 +255,6 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        fn toBuffer(t: TileT) [num_sides]LabelT {
-            return @bitCast(t);
-        }
-
         /// ==================
         /// = Public API
         /// ==================
@@ -291,36 +283,47 @@ pub fn Solver(comptime TileT: type) type {
             }
             std.debug.assert(size == grid.len);
 
-            // Solving algorithm:
+            // Solving algorithm setup:
             self.grid = grid;
             self.dimensions = dimensions;
 
             // Initialize possibilities
-            const possibilities: []BitsetT = try self.allocator.alloc(BitsetT, grid.len);
-            defer self.allocator.free(possibilities);
+            self.possibilities = try self.allocator.alloc(BitsetT, grid.len);
+            defer self.allocator.free(self.possibilities);
 
-            for (possibilities) |*b| {
+            for (self.possibilities) |*b| {
                 b.* = try BitsetT.initFull(self.allocator, self.tileset.len);
             }
-            defer for (possibilities) |*b| {
+            defer for (self.possibilities) |*b| {
                 b.deinit();
             };
 
-            while (!self.isCollapsed(possibilities)) {
-                std.debug.print("iterating!\n", .{});
-                try self.iterate(possibilities);
+            // Debug precollapse step
+            const d = self.getRandomCoords();
+            try self.collapseAt(d);
+            try self.propagate(d);
+
+            // ----------------
+            // - Wfc algorithm:
+            // ----------------
+            while (!self.isCollapsed()) {
+                try self.iterate();
             }
 
-            if (self.isContradiction(possibilities)) {
+            if (self.isContradiction()) {
                 return WFCError.Contradiction;
             }
 
             // Set all the positions to their solved values
             // Should not panic, since we confirmed all positions have at least 1 possibility
             for (grid, 0..) |*p, i| {
-                p.* = possibilities[i].findFirstSet().?;
+                p.* = self.possibilities[i].findFirstSet().?;
             }
 
+        }
+
+        fn toBuffer(t: TileT) [num_sides]LabelT {
+            return @bitCast(t);
         }
 
         /// ========================
@@ -328,8 +331,8 @@ pub fn Solver(comptime TileT: type) type {
         /// ========================
 
         // Check if all positions have at most 1 possibility
-        fn isCollapsed(_: *Self, possibilities: []BitsetT) bool {
-            for (possibilities) |*b| {
+        fn isCollapsed(self: *Self) bool {
+            for (self.possibilities) |*b| {
                 if (b.count() > 1) {
                     return false;
                 }
@@ -338,8 +341,8 @@ pub fn Solver(comptime TileT: type) type {
         }
         
         // Check if some positions have 0 possibilities
-        fn isContradiction(_: *Self, possibilities: []BitsetT) bool {
-            for (possibilities) |*b| {
+        fn isContradiction(self: *Self) bool {
+            for (self.possibilities) |*b| {
                 if (b.count() == 0) {
                     return true;
                 }
@@ -347,20 +350,20 @@ pub fn Solver(comptime TileT: type) type {
             return false;
         }
 
-        fn iterate(self: *Self, possibilities: []BitsetT) !void {
-            const p: GridIndex = self.getMinEntropyCoordinates(possibilities);
-            try self.collapseAt(p, possibilities);
-            try self.propagate(p, possibilities);
+        fn iterate(self: *Self) !void {
+            const p: GridIndex = self.getMinEntropyCoordinates();
+            try self.collapseAt(p);
+            try self.propagate(p);
         }
 
         // TODO: Explain...
         // NOTE: Implementation detail: among all positions with same entropy, the one with lowest index is chosen.
         // NOTE: Naive linear search, can use a memoized result from propagation instead 
-        fn getMinEntropyCoordinates(self: *Self, possibilities: []BitsetT) GridIndex {
+        fn getMinEntropyCoordinates(self: *Self) GridIndex {
             var min_entropy_position: GridIndex = 0;
             var min_entropy: usize = self.tileset.len;
             
-            for (possibilities, 0..) |*p, i|{
+            for (self.possibilities, 0..) |*p, i|{
                 if (p.count() < min_entropy and p.count() > 1) {
                     min_entropy_position = i;
                     min_entropy = p.count();
@@ -372,19 +375,13 @@ pub fn Solver(comptime TileT: type) type {
         }
 
         // NOTE: If alternate collapse behaviors are later supported, modify this function
-        fn collapseAt(self: *Self, p: GridIndex, possibilities: []BitsetT) !void {
+        fn collapseAt(self: *Self, p: GridIndex) !void {
             // std.debug.print("collapsing at {}\n", .{p});
-
-            const b: *BitsetT = &possibilities[p];
-            // std.debug.print("bitset before collapse:\n", .{});
-            // printBitset(b);
-
+            const b: *BitsetT = &self.possibilities[p];
             try self.collapseRandom(b);
-            // std.debug.print("bitset after collapse:\n", .{});
-            // printBitset(b);
         }
 
-        fn propagate(self: *Self, p: GridIndex, possibilities: []BitsetT) !void {
+        fn propagate(self: *Self, p: GridIndex) !void {
             var stack = std.ArrayList(GridIndex).init(self.allocator);
             defer stack.deinit();
 
@@ -397,7 +394,7 @@ pub fn Solver(comptime TileT: type) type {
 
                 for (neighbors, 0..) |opt, k| {
                     if (opt) |n| {
-                        if (try self.propagateAt(cur, n, k, possibilities)) {
+                        if (try self.propagateAt(cur, n, k)) {
                             try stack.append(n);
                         }
                     }
@@ -419,16 +416,10 @@ pub fn Solver(comptime TileT: type) type {
         // TODO: Rephrase explanation
         // NOTE: Returns true if neighbor's number of possible tiles decreased, false otherwise
         // NOTE: Following convention of rest of module, k is the index to the side of current tile that is adjacent to neighbor tile
-        fn propagateAt(self: *Self, current: GridIndex, neighbor: GridIndex, k: usize, possibilities: []BitsetT) !bool {
+        fn propagateAt(self: *Self, current: GridIndex, neighbor: GridIndex, k: usize) !bool {
             // std.debug.print("Propagating to neighbor {} at side {} from current {}\n", .{neighbor, k, current});
-            var neighbor_tiles: *BitsetT = &possibilities[neighbor];
-            var current_tiles: *BitsetT  = &possibilities[current];
-
-            // std.debug.print("Current bitset:\n", .{});
-            // printBitset(current_tiles);
-
-            // std.debug.print("Neighbor bitset:\n", .{});
-            // printBitset(neighbor_tiles);
+            var neighbor_tiles: *BitsetT = &self.possibilities[neighbor];
+            var current_tiles: *BitsetT  = &self.possibilities[current];
 
             const initial_amount: usize = neighbor_tiles.count();
 
@@ -442,15 +433,8 @@ pub fn Solver(comptime TileT: type) type {
                 }  
             }
 
-            // std.debug.print("Allowed bitset:\n", .{});
-            // printBitset(&allowed);
-
             neighbor_tiles.setIntersection(allowed); //set intersection
 
-            // std.debug.print("Neighbor bitset after constraining:\n", .{});
-            // printBitset(neighbor_tiles);
-
-            // std.debug.print("Did constrain? {}\n", .{neighbor_tiles.count() < initial_amount});
             return neighbor_tiles.count() < initial_amount;
         }
         
@@ -534,7 +518,7 @@ pub fn Solver(comptime TileT: type) type {
             defer indeces.deinit();
 
 
-            // Fill in arr, and unset all in same pass
+            // Fill in indeces, and unset all in same pass
             for (0..tiles.capacity()) |j| {
                 if (tiles.isSet(j)) {
                     try indeces.append(j);
@@ -555,12 +539,24 @@ pub fn Solver(comptime TileT: type) type {
         /// = Debug methods
         /// =================
         
+        fn getRandomCoords(self: *Self) GridIndex {
+            return self.rand.uintLessThan(TileIndex, self.grid.len);
+        }
+
         fn printAdjacencies(adjacencies: [][num_sides]BitsetT) void {
             for (adjacencies, 0..) |*arr, i| {
                 std.debug.print("Adjacency for the {}th tile:\n", .{i});
                 for (arr, 0..) |*b, k| {
                     std.debug.print("\t{}th side:\n", .{k});
-                    printBitset(b);
+                    printAdjacencyBitset(b, k);
+                }
+            }
+        }
+
+        fn printAdjacencyBitset(b: *BitsetT, k: usize) void {
+            for (0..b.capacity()) |j| {
+                if (b.isSet(j)) {
+                    std.debug.print("\t\t{}th tile allowed on {}th side\n", .{j, (k+num_sides/2)%num_sides});
                 }
             }
         }
@@ -576,31 +572,16 @@ pub fn Solver(comptime TileT: type) type {
     };
 }
 
+
+
 const testing = std.testing;
 const test_allocator = std.testing.allocator;
 
-// test "basic solver test" {
-//     const allocator = test_allocator;
+test "test toBuffer" {
+    const t = SquareTile{.xpos = 0, .ypos = 1, .xneg = 2, .yneg = 3};
+    const buf = Solver(SquareTile).toBuffer(t);
 
-//     const tiles = [_]SquareTile{
-//         SquareTile{.xpos = 1, .xneg = 1, .ypos = 1, .yneg = 1}
-//     };
-
-//     var prng = std.rand.DefaultPrng.init(blk: {
-//         var seed: u64 = undefined;
-//         try std.os.getrandom(std.mem.asBytes(&seed));
-//         break :blk seed;
-//     });
-//     const rand = prng.random();
-//     var solver = try Solver(SquareTile).init(allocator, &tiles, rand);
-//     defer solver.deinit();
-
-//     var grid = try allocator.alloc(usize, 100);
-//     defer allocator.free(grid);
-
-//     // Test that it errors out when provided dimensions do not match grid 
-//     // try solver.solve(grid, .{.x = 5, .y = 10});
-//     // testing.expectError(WFCError.InvalidGridSize, err);
-
-//     try solver.solve(grid, .{.x = 10, .y = 10});
-// }
+    for (0..4) |i| {
+        try testing.expect(buf[i] == i);
+    }
+}
