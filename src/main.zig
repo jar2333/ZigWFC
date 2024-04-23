@@ -30,17 +30,25 @@ pub fn main() !void {
         // +
         wfc.SquareTile{.xpos = 2, .ypos = 2, .xneg = 2, .yneg = 2},
 
-        // r
+        // ┌
         wfc.SquareTile{.xpos = 2, .ypos = 2, .xneg = 1, .yneg = 1},
 
-        // J
+        // ┘
         wfc.SquareTile{.xpos = 1, .ypos = 1, .xneg = 2, .yneg = 2},
 
-        // L
+        // └
         wfc.SquareTile{.xpos = 2, .ypos = 1, .xneg = 1, .yneg = 2},
 
-        // q
+        // ┐
         wfc.SquareTile{.xpos = 1, .ypos = 2, .xneg = 2, .yneg = 1},
+
+        wfc.SquareTile{.xpos = 2, .ypos = 2, .xneg = 2, .yneg = 1},
+
+        wfc.SquareTile{.xpos = 1, .ypos = 2, .xneg = 2, .yneg = 2},
+
+        wfc.SquareTile{.xpos = 2, .ypos = 2, .xneg = 1, .yneg = 2},
+
+        wfc.SquareTile{.xpos = 2, .ypos = 1, .xneg = 2, .yneg = 2},
     };
 
     var prng = std.rand.DefaultPrng.init(blk: {
@@ -79,15 +87,12 @@ fn printSquareGrid(grid: []const usize, width: usize, height: usize) !void {
     while (y < height): (y += 1) {
         while (x < width): (x += 1) {
             try w.print("{u}", .{try translateUnicode(grid[x+y*width])});
-            // if (x != width-1) {
-            //     try w.print(" ", .{});
-            // }
         }
         x = 0;
-        try w.print("\n", .{});
+        try w.writeByte('\n');
     }
 
-    try w.print("\n", .{});
+    try w.writeByte('\n');
 }
 
 fn translateUnicode(index: usize) !u21 {
@@ -99,10 +104,10 @@ fn translateUnicode(index: usize) !u21 {
         5 => "┘",
         6 => "└",
         7 => "┐",
-        // 8 => "⊤",
-        // 9 => "⊣",
-        // 10 => "⊢",
-        // 11 => "⊥",
+        8 => "┬",
+        9 => "┤",
+        10 => "├",
+        11 => "┴",
         else => "∘"
     });
 }
