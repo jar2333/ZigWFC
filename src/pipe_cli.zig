@@ -4,8 +4,15 @@ const io = @import("std").io;
 
 const wfc = @import("./wfc.zig");
 
+const CLIError = error {
+    NoValueProvided,
+    InvalidArgumentName,
+    InsufficientArguments,
+    Error
+};
+
 const WFCConfig = struct {
-    seed: u64,
+    seed: ?u64,
     tiles: []const wfc.SquareTile,
     width: usize,
     height: usize,
@@ -74,37 +81,60 @@ fn processCommandLineArgs(allocator: std.mem.Allocator) !WFCConfig {
     var argsIterator = try std.process.ArgIterator.initWithAllocator(allocator);
     defer argsIterator.deinit();
 
-    // Skip executable
+    // Skip executable name
     _ = argsIterator.next();
 
-    // var stack = std.ArrayList([:0]const u8).init(allocator);
-    // defer stack.deinit();
-
-    // while (argsIterator.next()) |arg| {
-    //     if (arg[0] == '-') {
-    //         if (arg.len == 0)
-    //         switch (arg[1]) {
-    //             'w' => 0
-    //         };
-    //     }
-    // }
-    
-
-    return WFCConfig{
-        .seed = 0, 
+    var cfg = WFCConfig{
+        .seed = null, 
         .tiles = sample_tiles,
-        .width = 0,
-        .height = 0,
+        .width = 10,
+        .height = 10,
     };
+
+    while (argsIterator.next()) |arg| {
+        if (arg[0] != '-') {
+            return CLIError.InvalidArgumentName;
+        }
+        if (arg.len == 0 or arg.len > 1) {
+            return CLIError.InvalidArgumentName;
+        }
+
+        const value: [:0]const u8 = argsIterator.next() orelse return CLIError.NoValueProvided;
+
+        switch (arg[1]) {
+            'w' => cfg.width  = try std.fmt.parseInt(usize, value, 10),
+            'h' => cfg.height = try std.fmt.parseInt(usize, value, 10),
+            's' => cfg.seed   = try std.fmt.parseInt(u64, value, 10),
+            't' => cfg.tiles  = try parseTiles(allocator, value),
+            else => return CLIError.InvalidArgumentName
+        }
+    }
+
+    return cfg;
+}
+
+// Parse tile data from a file
+fn parseTiles(allocator: std.mem.Allocator, _: [:0]const u8) ![]wfc.SquareTiles {
+
+
+    return try allocator.alloc(wfc.SquareTile, 0);
 }
 
 fn runWFC(allocator: std.mem.Allocator, cfg: WFCConfig, grid: []usize) !void {
-    const seed = cfg.seed;
+    const seed_opt = cfg.seed;
     const tiles = cfg.tiles;
     const width = cfg.width;
     const height = cfg.height;
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = if (seed_opt) |seed| {
+        std.rand.DefaultPrng.init(seed);
+    }
+    else {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        std.rand.DefaultPrng.init(seed);
+    };
+
     const rand = prng.random();
 
     var solver = try wfc.Solver(wfc.SquareTile).init(allocator, tiles, rand);
