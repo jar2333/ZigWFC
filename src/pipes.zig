@@ -10,7 +10,6 @@ const CLIError = error {
     InvalidArgumentNameLength,
     UnsupportedArgumentOption,
     InsufficientArguments,
-    Error
 };
 
 const WFCConfig = struct {
@@ -106,6 +105,7 @@ fn processCommandLineArgs(allocator: std.mem.Allocator) !?WFCConfig {
     };
 
     while (argsIterator.next()) |arg| {
+        // Check for argument formatting
         if (arg[0] != '-') {
             return CLIError.InvalidArgumentName;
         }
@@ -113,11 +113,13 @@ fn processCommandLineArgs(allocator: std.mem.Allocator) !?WFCConfig {
             return CLIError.InvalidArgumentNameLength;
         }
 
+        // Process arguments with no value
         if (arg[1] == 'h') {
             try printHelp();
             return null;
         }
 
+        // Process arguments with 1 value
         const value: [:0]const u8 = argsIterator.next() orelse return CLIError.NoValueProvided;
 
         switch (arg[1]) {
