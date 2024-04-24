@@ -109,7 +109,7 @@ fn processCommandLineArgs(allocator: std.mem.Allocator) !?WFCConfig {
         if (arg[0] != '-') {
             return CLIError.InvalidArgumentName;
         }
-        if (arg.len == 0 or arg.len > 2) {
+        if (arg.len > 2) {
             return CLIError.InvalidArgumentNameLength;
         }
 
