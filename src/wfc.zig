@@ -192,6 +192,7 @@ pub fn Solver(comptime TileT: type) type {
             };
         }
 
+        // Time complexity: O(tiles.len*num_sides)
         fn populateAdjacencies(alloc: std.mem.Allocator, tiles: []const TileT, adjacencies: [][num_sides]BitsetT) !void {
             // Use bucketing algorithm to map all (side_index, label) pairs to a list of possible adjacent tiles
             // NOTE: Instead of list, we use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
@@ -305,11 +306,6 @@ pub fn Solver(comptime TileT: type) type {
             defer for (self.possibilities) |*b| {
                 b.deinit();
             };
-
-            // Debug precollapse step
-            const d = self.getRandomCoords();
-            try self.collapseAt(d);
-            try self.propagate(d);
 
             // ----------------
             // - Wfc algorithm:
