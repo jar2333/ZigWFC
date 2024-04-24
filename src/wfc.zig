@@ -34,7 +34,7 @@ const std = @import("std");
 // 5) yneg (down)
 // 6) zneg (?)
 
-const LabelT = u32;
+const LabelT = u8;
 
 pub const SquareTile = packed struct {
     xpos: LabelT = 0,
