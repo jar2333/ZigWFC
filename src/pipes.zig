@@ -47,6 +47,23 @@ const sample_tiles = [_]wfc.SquareTile{
     wfc.SquareTile{.xpos = 2, .ypos = 1, .xneg = 2, .yneg = 2},
 };
 
+fn translateUnicode(index: usize) !u21 {
+    return try unicode.utf8Decode(switch (index) {
+        1 => "─",
+        2 => "│",
+        3 => "┼",
+        4 => "┌",
+        5 => "┘",
+        6 => "└",
+        7 => "┐",
+        8 => "┬",
+        9 => "┤",
+        10 => "├",
+        11 => "┴",
+        else => "◦"
+    });
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -170,21 +187,4 @@ fn printSquareGrid(grid: []const usize, width: usize, height: usize) !void {
     }
 
     try w.writeByte('\n');
-}
-
-fn translateUnicode(index: usize) !u21 {
-    return try unicode.utf8Decode(switch (index) {
-        1 => "─",
-        2 => "│",
-        3 => "┼",
-        4 => "┌",
-        5 => "┘",
-        6 => "└",
-        7 => "┐",
-        8 => "┬",
-        9 => "┤",
-        10 => "├",
-        11 => "┴",
-        else => "◦"
-    });
 }
