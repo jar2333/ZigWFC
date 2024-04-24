@@ -214,7 +214,7 @@ pub fn Solver(comptime TileT: type) type {
 
             // For every tile, iterate through its sides, and insert the tile to the bucket corresponding to the opposite side and same label
             for (0..tiles.len) |tile_index| {
-              const buffer: [num_sides]LabelT = toBuffer(tiles[tile_index]);
+              const buffer: [num_sides]LabelT = @bitCast(tiles[tile_index]);
 
               for (0..num_sides) |k| {
                 const label: LabelT = buffer[k];
@@ -248,7 +248,7 @@ pub fn Solver(comptime TileT: type) type {
             for (tiles, 0..) |tile, tile_index| {
                 // adjacencies: []const[num_sides]BitsetT => adjacencies[tile_index][side_index].set(adjacent_tile_index)
                 // buckets: [num_sides]std.AutoHashMap(LabelT, Bucket) => buckets[side_index].getPtr(label).?
-                const buffer: [num_sides]LabelT = toBuffer(tile);
+                const buffer: [num_sides]LabelT = @bitCast(tile);
 
                 for (0..num_sides) |k| {
                     const label = buffer[k];
@@ -324,10 +324,6 @@ pub fn Solver(comptime TileT: type) type {
                 p.* = self.possibilities[i].findFirstSet().?;
             }
 
-        }
-
-        fn toBuffer(t: TileT) [num_sides]LabelT {
-            return @bitCast(t);
         }
 
         /// ========================
