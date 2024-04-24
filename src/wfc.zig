@@ -44,8 +44,8 @@ pub const SquareTile = packed struct {
 };
 
 const SquareDimensions = packed struct {
-    x: u32,
-    y: u32
+    x: usize,
+    y: usize
 };
 
 pub const CubeTile = packed struct {
@@ -58,9 +58,9 @@ pub const CubeTile = packed struct {
 };
 
 const CubeDimensions = packed struct {
-    x: u32,
-    y: u32,
-    z: u32
+    x: usize,
+    y: usize,
+    z: usize
 };
 
 pub const WFCError = error{
@@ -278,9 +278,9 @@ pub fn Solver(comptime TileT: type) type {
 
         pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
             // Check if provided dimensions fit into provided grid
-            var size: u32 = 1;
+            var size: usize = 1;
             inline for (std.meta.fields(DimensionT)) |f| {
-                const v = @as(u32, @field(dimensions, f.name));
+                const v = @as(usize, @field(dimensions, f.name));
                 if (v == 0) {
                     return WFCError.InvalidGridSize;
                 }
@@ -463,7 +463,7 @@ pub fn Solver(comptime TileT: type) type {
             const n = self.grid.len;
 
             // Gets easily indexable width, height(, depth)
-            const buffer: [dim]u32 = @bitCast(self.dimensions);
+            const buffer: [dim]usize = @bitCast(self.dimensions);
 
             // Treat on case by case basis due to special logic for each grid type
             switch (TileT) {
