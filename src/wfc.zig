@@ -311,7 +311,9 @@ pub fn Solver(comptime TileT: type) type {
             // - Wfc algorithm:
             // ----------------
             while (!self.isCollapsed()) {
-                try self.iterate();
+                const p: GridIndex = self.getMinEntropyCoordinates();
+                try self.collapseAt(p);
+                try self.propagate(p);
             }
 
             if (self.isContradiction()) {
@@ -350,12 +352,6 @@ pub fn Solver(comptime TileT: type) type {
             return false;
         }
 
-        fn iterate(self: *Self) !void {
-            const p: GridIndex = self.getMinEntropyCoordinates();
-            try self.collapseAt(p);
-            try self.propagate(p);
-        }
-
         // TODO: Explain...
         // NOTE: Implementation detail: among all positions with same entropy, the one with lowest index is chosen.
         // NOTE: Naive linear search, can use a memoized result from propagation instead 
@@ -381,6 +377,7 @@ pub fn Solver(comptime TileT: type) type {
             try self.collapseRandom(b);
         }
 
+        // DFS traversal propagating the effects of a collapse to rest of grid
         fn propagate(self: *Self, p: GridIndex) !void {
             var stack = std.ArrayList(GridIndex).init(self.allocator);
             defer stack.deinit();
