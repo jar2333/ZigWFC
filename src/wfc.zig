@@ -423,14 +423,14 @@ pub fn Solver(comptime TileT: type) type {
             var allowed: BitsetT = try BitsetT.initEmpty(self.allocator, self.tileset.len);
             defer allowed.deinit();
 
-            for (0..current_tiles.capacity()) |i| {
-                if (current_tiles.isSet(i)) {
-                    const tile_neighbors: *const BitsetT = self.getAdjacencies(i, k);
-                    allowed.setUnion(tile_neighbors.*); //set union
-                }  
+            // Efficient iterator using @clz intrinsic
+            var iterator = current_tiles.iterator(.{});
+            while (iterator.next()) |i| {
+                const tile_neighbors: *const BitsetT = self.getAdjacencies(i, k);
+                allowed.setUnion(tile_neighbors.*); // efficient bitset union
             }
 
-            neighbor_tiles.setIntersection(allowed); //set intersection
+            neighbor_tiles.setIntersection(allowed); // efficient bitset intersection
 
             return neighbor_tiles.count() < initial_amount;
         }
@@ -508,19 +508,17 @@ pub fn Solver(comptime TileT: type) type {
             }
         }
 
-        // 
+        // TODO: Make more efficient using Zig 0.12.0 tiles.unsetAll() and an iterator
         fn collapseRandom(self: *Self, tiles: *BitsetT) !void {
             // We need to get indeces for tiles that are possible
             var indeces = std.ArrayList(usize).init(self.allocator);
             defer indeces.deinit();
 
-
-            // Fill in indeces, and unset all in same pass
-            for (0..tiles.capacity()) |j| {
-                if (tiles.isSet(j)) {
-                    try indeces.append(j);
-                    tiles.unset(j);
-                }
+            // Get all set bit indeces and store them, then unset
+            var iterator = tiles.iterator(.{});
+            while (iterator.next()) |j| {
+                try indeces.append(j);
+                tiles.unset(j);                
             }
 
             // Set the tile which corresponds to a random index among possible indeces 
