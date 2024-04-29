@@ -164,6 +164,7 @@ pub fn Solver(comptime TileT: type) type {
         possibilities: []BitsetT = undefined,
         dimensions: DimensionT = undefined,
         grid: []TileIndex = undefined,
+        collapsed_count: usize = 0,
         
 
         /// ==================
@@ -295,6 +296,7 @@ pub fn Solver(comptime TileT: type) type {
             // Solving algorithm setup:
             self.grid = grid;
             self.dimensions = dimensions;
+            self.collapsed_count = 0;
 
             // Initialize possibilities
             self.possibilities = try self.allocator.alloc(BitsetT, grid.len);
@@ -316,10 +318,6 @@ pub fn Solver(comptime TileT: type) type {
                 try self.propagate(p);
             }
 
-            if (self.isContradiction()) {
-                return WFCError.Contradiction;
-            }
-
             // Set all the positions to their solved values
             // Should not panic, since we confirmed all positions have at least 1 possibility
             for (grid, 0..) |*p, i| {
@@ -334,25 +332,10 @@ pub fn Solver(comptime TileT: type) type {
 
         // Check if all positions have at most 1 possibility
         fn isCollapsed(self: *Self) bool {
-            for (self.possibilities) |*b| {
-                if (b.count() > 1) {
-                    return false;
-                }
-            }
-            return true;
+            return self.collapsed_count == self.grid.len;
         }
         
-        // Check if some positions have 0 possibilities
-        fn isContradiction(self: *Self) bool {
-            for (self.possibilities) |*b| {
-                if (b.count() == 0) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // TODO: Explain...
+        // Gets the coordinates for the first grid position with the least number of possibilities
         // NOTE: Implementation detail: among all positions with same entropy, the one with lowest index is chosen.
         // NOTE: Naive linear search, can use a memoized result from propagation instead 
         fn getMinEntropyCoordinates(self: *Self) GridIndex {
@@ -367,7 +350,6 @@ pub fn Solver(comptime TileT: type) type {
             }
 
             return min_entropy_position;
-            // return self.rand.uintLessThan(GridIndex, self.grid.len);
         }
 
         // NOTE: If alternate collapse behaviors are later supported, modify this function
@@ -375,6 +357,7 @@ pub fn Solver(comptime TileT: type) type {
             // std.debug.print("collapsing at {}\n", .{p});
             const b: *BitsetT = &self.possibilities[p];
             try self.collapseRandom(b);
+            self.collapsed_count += 1;
         }
 
         // DFS traversal propagating the effects of a collapse to rest of grid
@@ -432,7 +415,19 @@ pub fn Solver(comptime TileT: type) type {
 
             neighbor_tiles.setIntersection(allowed); // efficient bitset intersection
 
-            return neighbor_tiles.count() < initial_amount;
+            // TODO: Fiddle with the most efficient way to do this part, it is the hot path
+            if (neighbor_tiles.count() == initial_amount) {
+                return false;
+            }
+
+            switch (neighbor_tiles.count()) {
+                0 => return WFCError.Contradiction,
+                1 => {
+                    self.collapsed_count += 1; 
+                    return true;
+                },
+                else => return true
+            }
         }
         
         // Row major indexing formulas:
