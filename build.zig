@@ -15,13 +15,6 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "main",
-        .root_source_file = .{.path = "src/main.zig"},
-        .target = target,
-        .optimize = optimize,
-    });
-
     const demo = b.addExecutable(.{
         .name = "demo",
         .root_source_file = .{.path = "src/pipes.zig"},
@@ -29,7 +22,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    b.installArtifact(exe);
     b.installArtifact(demo);
 
     // This *creates* a Run step in the build graph, to be executed when another
