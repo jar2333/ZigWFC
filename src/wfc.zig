@@ -319,12 +319,95 @@ pub fn Solver(comptime TileT: type) type {
             }
 
             // Set all the positions to their solved values
-            // Should not panic, since we confirmed all positions have at least 1 possibility
+            // Should not panic, since no contradiction was encountered
             for (grid, 0..) |*p, i| {
                 p.* = self.possibilities[i].findFirstSet().?;
             }
 
         }
+        
+        const View = struct{
+            solver: *Solver(TileT),
+            collapse_callbacks:  std.AutoHashMap(usize, *const fn (cur: *const BitsetT) void),
+            collapse_callback_count: usize,
+            propagate_callbacks: std.AutoHashMap(usize, *const fn (cur: *const BitsetT, adj: *const BitsetT) void),
+            propagate_callback_count: usize,
+
+            pub fn setPossibilities(self: *@This(), p: GridIndex, b: *const BitsetT) void {
+                self.solver.possibilities[p] = b;
+            } 
+
+            pub fn getPossibilities(self: *@This(), p: GridIndex) *BitsetT {
+                return self.solver.possibilities[p];
+            }
+
+            pub fn step(self: *@This()) *Self {
+                const p: GridIndex = self.solver.getMinEntropyCoordinates();
+                self.collapseAt(p);
+                self.propagate(p);
+                return self;
+            }
+
+            pub fn iterate(self: *@This(), i: usize) *Self {
+                var count = 0;
+                while (count < i and self.isCollapsed()) : (count += 1) {
+                    self.step();
+                }
+                return self;
+            }
+
+            pub fn isCollapsed(self: *@This()) bool {
+                self.solver.isCollapsed();
+            }
+
+            fn collapseAt(self: *@This(), p: GridIndex) !void {
+                try self.solver.collapseAt(p);
+
+                const cur = self.solver.getPossibilities(p);
+
+                const iterator = self.collapse_callbacks.valueIterator();
+                while (iterator.next()) |callback| {
+                    callback.*(cur);
+                }
+            }
+
+            fn propagate(self: *@This(), p: GridIndex) !void {
+                var stack = std.ArrayList(GridIndex).init(self.allocator);
+                defer stack.deinit();
+
+                try stack.append(p);
+                while (stack.items.len > 0) {
+                    const cur = stack.pop();
+
+                    var neighbors: [num_sides]?GridIndex = [_]?GridIndex{null} ** num_sides;
+                    self.solver.getNeighbors(neighbors[0..num_sides], cur);
+
+                    for (neighbors, 0..) |opt, k| {
+                        if (opt) |n| {
+                            const changed = try self.solver.propagateAt(cur, n, k);
+
+                            const iterator = self.propagate_callbacks.valueIterator();
+                            while (iterator.next()) |callback| {
+                                callback.*(cur, n);
+                            }
+
+                            if (changed) {
+                                try stack.append(n);
+                            }
+                        }
+                    }
+                }
+            }
+
+        };
+
+        pub fn getView(self: *Self) View {
+            return View{
+                .solver = self,
+
+            };
+        }
+
 
         /// ========================
         /// = Private Helpers: WFC
@@ -442,8 +525,7 @@ pub fn Solver(comptime TileT: type) type {
         // z = i / (width*height)
         // NOTE: Do i use a *[num_sides]?GridIndex or a []?GridIndex with an assert(len == num_sides) ? 
         // NOTE: Consider moving the nulling to propagate ? 
-        fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
-            std.debug.assert(neighbors.len == num_sides);
+        fn getNeighbors(self: *Self, neighbors: *[num_sides]?GridIndex, p: GridIndex) void {
             const n = self.grid.len;
 
             // Gets easily indexable width, height(, depth)
@@ -523,6 +605,10 @@ pub fn Solver(comptime TileT: type) type {
 
         fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
             return &self.adjacencies[p][k];
+        }
+
+        fn getPossibilities(self: *Self, p: GridIndex) *const BitsetT {
+            return &self.possibilities[p];
         }
 
         /// =================
