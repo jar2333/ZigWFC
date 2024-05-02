@@ -525,43 +525,8 @@ pub fn Solver(comptime TileT: type) type {
             return &self.adjacencies[p][k];
         }
 
-        /// =================
-        /// = Debug methods
-        /// =================
-        
-        fn getRandomCoords(self: *Self) GridIndex {
-            return self.rand.uintLessThan(TileIndex, self.grid.len);
-        }
-
-        fn printAdjacencies(adjacencies: [][num_sides]BitsetT) void {
-            for (adjacencies, 0..) |*arr, i| {
-                std.debug.print("Adjacency for the {}th tile:\n", .{i});
-                for (arr, 0..) |*b, k| {
-                    std.debug.print("\t{}th side:\n", .{k});
-                    printAdjacencyBitset(b, k);
-                }
-            }
-        }
-
-        fn printAdjacencyBitset(b: *BitsetT, k: usize) void {
-            for (0..b.capacity()) |j| {
-                if (b.isSet(j)) {
-                    std.debug.print("\t\t{}th tile allowed on {}th side\n", .{j, (k+num_sides/2)%num_sides});
-                }
-            }
-        }
-
-        fn printBitset(b: *BitsetT) void {
-            for (0..b.capacity()) |j| {
-                if (b.isSet(j)) {
-                    std.debug.print("\t\t{}th tile allowed\n", .{j});
-                }
-            }
-        }
-
     };
 }
-
 
 
 const testing = std.testing;
