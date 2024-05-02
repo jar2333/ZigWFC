@@ -105,6 +105,13 @@ pub const WFCError = error{
 //     opposite = (k+(n/2))%n
 //     bucket[label][opposite].add(i)
 
+// Options allow specifying comptime values to minimize dynamic allocation, or enabling opt-in features.
+const SolverOptions = struct {
+    enable_callbacks: bool = false,
+    grid_size: ?comptime_int = null,
+    tiles_size: ?comptime_int = null,
+};
+
 pub fn Solver(comptime TileT: type) type {
     // Comptime constants
     const DimensionT: type = switch (TileT) {
