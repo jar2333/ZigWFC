@@ -166,7 +166,7 @@ fn runWFC(allocator: std.mem.Allocator, cfg: WFCConfig, grid: []usize) !void {
     });
     const rand = prng.random();
 
-    var solver = try wfc.Solver(wfc.SquareTile).init(allocator, tiles, rand);
+    var solver = try wfc.Solver(wfc.SquareTile, .{}).init(allocator, tiles, rand);
     defer solver.deinit();
 
     try solver.solve(grid, .{.x = width, .y = height});

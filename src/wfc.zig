@@ -105,7 +105,12 @@ pub const WFCError = error{
 //     opposite = (k+(n/2))%n
 //     bucket[label][opposite].add(i)
 
-pub fn Solver(comptime TileT: type) type {
+// Options allow specifying comptime values to minimize dynamic allocation, or enabling opt-in features.
+const SolverOptions = struct {
+    enable_callbacks: bool = false,
+};
+
+pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
     // Comptime constants
     const DimensionT: type = switch (TileT) {
         SquareTile => SquareDimensions,
@@ -197,16 +202,8 @@ pub fn Solver(comptime TileT: type) type {
         fn populateAdjacencies(alloc: std.mem.Allocator, tiles: []const TileT, adjacencies: [][num_sides]BitsetT) !void {
             // Use bucketing algorithm to map all (side_index, label) pairs to a list of possible adjacent tiles
             // NOTE: Instead of list, we use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
-            const Bucket = struct {
-                items: []TileIndex = undefined,
-                count: usize = 0,
-
-                pub fn add(self: *@This(), i: TileIndex) void {
-                    self.items[self.count] = i;
-                    self.count += 1;
-                } 
-            };
-            const HashMap = std.AutoHashMap(LabelT, Bucket);
+            const Bucket = std.ArrayListUnmanaged(TileIndex);
+            const HashMap = std.AutoArrayHashMap(LabelT, Bucket);
 
             var buckets: [num_sides]HashMap = [_]HashMap{HashMap.init(alloc)} ** num_sides;
             defer for (&buckets) |*hash| {
@@ -227,21 +224,19 @@ pub fn Solver(comptime TileT: type) type {
 
                 // Lazy intitialization: Initialize the bucket at the given side opposite_k if not already there
                 if (!v.found_existing) {
-                    v.value_ptr.* = Bucket{
-                        .items = try alloc.alloc(TileIndex, tiles.len),
-                    };
+                    v.value_ptr.* = try Bucket.initCapacity(alloc, tiles.len);
                 }
 
                 // Append the tile index i to the adjacency list
-                v.value_ptr.add(tile_index);
+                const new_item_ptr = v.value_ptr.addOneAssumeCapacity();
+                new_item_ptr.* = tile_index;
               }
             }
 
             // Deinitialize every bucket as cleanup
             defer for (&buckets) |*hash| {
-                var it = hash.valueIterator();
-                while (it.next()) |v| {
-                    alloc.free(v.items);
+                for (hash.values()) |*v| {
+                    v.deinit(alloc);
                 }
             };
 
@@ -257,8 +252,8 @@ pub fn Solver(comptime TileT: type) type {
                     // For each tile index in the adjacency list, set the corresponding bit in the bitset
                     const opt: ?*Bucket = buckets[k].getPtr(label);
                     if (opt) |ptr| {
-                        for (0..ptr.count) |adjacent_tile_index| {
-                            adjacencies[tile_index][k].set(ptr.items[adjacent_tile_index]);
+                        for (ptr.items) |adjacent_tile_index| {
+                            adjacencies[tile_index][k].set(adjacent_tile_index);
                         }
                     }
                 }
@@ -523,6 +518,40 @@ pub fn Solver(comptime TileT: type) type {
 
         fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
             return &self.adjacencies[p][k];
+        }
+
+        /// =================
+        /// = Debug methods
+        /// =================
+
+        fn getRandomCoords(self: *Self) GridIndex {
+            return self.rand.uintLessThan(TileIndex, self.grid.len);
+        }
+
+        fn printAdjacencies(adjacencies: [][num_sides]BitsetT) void {
+            for (adjacencies, 0..) |*arr, i| {
+                std.debug.print("Adjacency for the {}th tile:\n", .{i});
+                for (arr, 0..) |*b, k| {
+                    std.debug.print("\t{}th side:\n", .{k});
+                    printAdjacencyBitset(b, k);
+                }
+            }
+        }
+
+        fn printAdjacencyBitset(b: *BitsetT, k: usize) void {
+            for (0..b.capacity()) |j| {
+                if (b.isSet(j)) {
+                    std.debug.print("\t\t{}th tile allowed on {}th side\n", .{j, (k+num_sides/2)%num_sides});
+                }
+            }
+        }
+
+        fn printBitset(b: *BitsetT) void {
+            for (0..b.capacity()) |j| {
+                if (b.isSet(j)) {
+                    std.debug.print("\t\t{}th tile allowed\n", .{j});
+                }
+            }
         }
 
     };
