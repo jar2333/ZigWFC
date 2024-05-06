@@ -108,8 +108,6 @@ pub const WFCError = error{
 // Options allow specifying comptime values to minimize dynamic allocation, or enabling opt-in features.
 const SolverOptions = struct {
     enable_callbacks: bool = false,
-    grid_size: ?comptime_int = null,
-    tiles_size: ?comptime_int = null,
 };
 
 pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
