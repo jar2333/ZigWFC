@@ -204,15 +204,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
         fn populateAdjacencies(alloc: std.mem.Allocator, tiles: []const TileT, adjacencies: [][num_sides]BitsetT) !void {
             // Use bucketing algorithm to map all (side_index, label) pairs to a list of possible adjacent tiles
             // NOTE: Instead of list, we use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
-            const Bucket = struct {
-                items: []TileIndex = undefined,
-                count: usize = 0,
-
-                pub fn add(self: *@This(), i: TileIndex) void {
-                    self.items[self.count] = i;
-                    self.count += 1;
-                } 
-            };
+            const Bucket = std.ArrayListUnmanaged(TileIndex);
             const HashMap = std.AutoHashMap(LabelT, Bucket);
 
             var buckets: [num_sides]HashMap = [_]HashMap{HashMap.init(alloc)} ** num_sides;
@@ -234,13 +226,12 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
 
                 // Lazy intitialization: Initialize the bucket at the given side opposite_k if not already there
                 if (!v.found_existing) {
-                    v.value_ptr.* = Bucket{
-                        .items = try alloc.alloc(TileIndex, tiles.len),
-                    };
+                    v.value_ptr.* = try Bucket.initCapacity(alloc, tiles.len);
                 }
 
                 // Append the tile index i to the adjacency list
-                v.value_ptr.add(tile_index);
+                const new_item_ptr = v.value_ptr.addOneAssumeCapacity();
+                new_item_ptr.* = tile_index;
               }
             }
 
@@ -248,7 +239,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             defer for (&buckets) |*hash| {
                 var it = hash.valueIterator();
                 while (it.next()) |v| {
-                    alloc.free(v.items);
+                    v.deinit(alloc);
                 }
             };
 
@@ -264,8 +255,8 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
                     // For each tile index in the adjacency list, set the corresponding bit in the bitset
                     const opt: ?*Bucket = buckets[k].getPtr(label);
                     if (opt) |ptr| {
-                        for (0..ptr.count) |adjacent_tile_index| {
-                            adjacencies[tile_index][k].set(ptr.items[adjacent_tile_index]);
+                        for (ptr.items) |adjacent_tile_index| {
+                            adjacencies[tile_index][k].set(adjacent_tile_index);
                         }
                     }
                 }
