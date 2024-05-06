@@ -112,7 +112,7 @@ const SolverOptions = struct {
     tiles_size: ?comptime_int = null,
 };
 
-pub fn Solver(comptime TileT: type) type {
+pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
     // Comptime constants
     const DimensionT: type = switch (TileT) {
         SquareTile => SquareDimensions,
