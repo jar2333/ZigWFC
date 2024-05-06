@@ -110,7 +110,7 @@ const SolverOptions = struct {
     enable_callbacks: bool = false,
 };
 
-pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
+pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
     // Comptime constants
     const DimensionT: type = switch (TileT) {
         SquareTile => SquareDimensions,
@@ -129,12 +129,6 @@ pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
         const SideIndex = usize;
 
         const BitsetT = std.bit_set.DynamicBitSet;
-
-        const CollapseCallback = *const fn (cur: *const BitsetT) void;
-        const PropagateCallback = *const fn (cur: *const BitsetT, adj: *const BitsetT) void;
-
-        const CollapseCallbackList = if (options.enable_callbacks) std.SinglyLinkedList(CollapseCallback) else void;
-        const PropagateCallbackList = if (options.enable_callbacks) std.SinglyLinkedList(PropagateCallback) else void;
 
         // ===================
         // = Member Variables
@@ -170,8 +164,6 @@ pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
         tileset: []const TileT = undefined,
         adjacencies: [][num_sides]BitsetT = undefined,
         rand: std.rand.Random = undefined,
-        collapse_callbacks: CollapseCallbackList = undefined,
-        propagate_callbacks: PropagateCallbackList = undefined,
 
         // At solve
         possibilities: []BitsetT = undefined,
@@ -361,8 +353,6 @@ pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
             const b: *BitsetT = &self.possibilities[p];
             try self.collapseRandom(b);
             self.collapsed_count += 1;
-
-            self.invokeCollapseCallbacks(b);
         }
 
         // DFS traversal propagating the effects of a collapse to rest of grid
@@ -378,39 +368,11 @@ pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
                 self.getNeighbors(neighbors[0..num_sides], cur);
 
                 for (neighbors, 0..) |opt, k| {
-                    if (opt) |adj| {
-                        if (try self.propagateAt(cur, adj, k)) {
-                            try stack.append(adj);
+                    if (opt) |n| {
+                        if (try self.propagateAt(cur, n, k)) {
+                            try stack.append(n);
                         }
-
-                        self.invokePropagateCallbacks(self.getPossibility(cur), self.getPossibility(adj));
                     }
-                }
-            }
-        }
-
-        fn invokeCollapseCallbacks(self: *Self, cur: *const BitsetT) void {
-            // Call all callbacks if they exist
-            if (CollapseCallbackList == std.SinglyLinkedList(CollapseCallback)) {
-                const callbacks = self.collapse_callbacks;
-                var cur_node = callbacks.first;
-                while (cur_node) |node_ptr| {
-                    const func = node_ptr.data;
-                    func(cur);
-                    cur_node = node_ptr.next;
-                }
-            }
-        }
-
-        fn invokePropagateCallbacks(self: *Self, cur: *const BitsetT, adj: *const BitsetT) void {
-            // Call all callbacks if they exist
-            if (PropagateCallbackList == std.SinglyLinkedList(PropagateCallbackList)) {
-                const callbacks = self.propagate_callbacks;
-                var cur_node = callbacks.first;
-                while (cur_node) |node_ptr| {
-                    const func = node_ptr.data;
-                    func(cur, adj);
-                    cur_node = node_ptr.next;
                 }
             }
         }
@@ -431,8 +393,8 @@ pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
         // NOTE: Following convention of rest of module, k is the index to the side of current tile that is adjacent to neighbor tile
         fn propagateAt(self: *Self, current: GridIndex, neighbor: GridIndex, k: usize) !bool {
             // std.debug.print("Propagating to neighbor {} at side {} from current {}\n", .{neighbor, k, current});
-            var neighbor_tiles: *BitsetT = self.getPossibility(neighbor);
-            var current_tiles: *BitsetT  = self.getPossibility(current);
+            var neighbor_tiles: *BitsetT = &self.possibilities[neighbor];
+            var current_tiles: *BitsetT  = &self.possibilities[current];
 
             const initial_amount: usize = neighbor_tiles.count();
 
@@ -556,10 +518,6 @@ pub fn Solver(comptime TileT: type, comptime options: SolverOptions) type {
 
         fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
             return &self.adjacencies[p][k];
-        }
-
-        fn getPossibility(self: *Self, p: GridIndex) *BitsetT {
-            return &self.possibilities[p];
         }
 
         /// =================
