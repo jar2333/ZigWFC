@@ -205,7 +205,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             // Use bucketing algorithm to map all (side_index, label) pairs to a list of possible adjacent tiles
             // NOTE: Instead of list, we use an array bounded by tiles.len and a capacity. If tiles is known at comptime, no dynamic allocation needed.
             const Bucket = std.ArrayListUnmanaged(TileIndex);
-            const HashMap = std.AutoHashMap(LabelT, Bucket);
+            const HashMap = std.AutoArrayHashMap(LabelT, Bucket);
 
             var buckets: [num_sides]HashMap = [_]HashMap{HashMap.init(alloc)} ** num_sides;
             defer for (&buckets) |*hash| {
@@ -237,8 +237,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
 
             // Deinitialize every bucket as cleanup
             defer for (&buckets) |*hash| {
-                var it = hash.valueIterator();
-                while (it.next()) |v| {
+                for (hash.values()) |*v| {
                     v.deinit(alloc);
                 }
             };
