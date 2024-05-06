@@ -435,10 +435,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
         // x = i % width;
         // y = (i / width)%height;
         // z = i / (width*height)
-        // NOTE: Do i use a *[num_sides]?GridIndex or a []?GridIndex with an assert(len == num_sides) ? 
-        // NOTE: Consider moving the nulling to propagate ? 
-        fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
-            std.debug.assert(neighbors.len == num_sides);
+        fn getNeighbors(self: *Self, neighbors: *[num_sides]?GridIndex, p: GridIndex) void {
             const n = self.grid.len;
 
             // Gets easily indexable width, height(, depth)
@@ -498,7 +495,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             }
         }
 
-        // TODO: Make more efficient using Zig 0.12.0 tiles.unsetAll() and an iterator
+        // TODO: Make more efficient using tiles.unsetAll() for static bitsets
         fn collapseRandom(self: *Self, tiles: *BitsetT) !void {
             // We need to get indeces for tiles that are possible
             var indeces = std.ArrayList(usize).init(self.allocator);
