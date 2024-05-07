@@ -65,7 +65,8 @@ const CubeDimensions = packed struct {
 
 pub const WFCError = error{
     InvalidGridSize,
-    Contradiction
+    Contradiction,
+    TooManyTiles,
 };
 
 // O(tiles.len*num_sides) complexity adjacency extraction algorithm:
@@ -123,10 +124,10 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
     return struct {
         const Self = @This();
 
-        const TileIndex = usize;
+        const TileIndex = u8;
         const GridIndex = usize;
 
-        const SideIndex = usize;
+        const MAX_TILES_LENGTH = 1 << @bitSizeOf(TileIndex);
 
         const BitsetT = std.bit_set.DynamicBitSet;
 
@@ -177,6 +178,10 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
         /// ==================
 
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT, rand: std.rand.Random) !Self {
+            if (tiles.len > MAX_TILES_LENGTH) {
+                return WFCError.TooManyTiles;
+            }
+
             // Initialize adjacencies array and bitsets in adjacencies array
             var adjacencies: [][num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
             for (0..tiles.len) |i| {
@@ -229,7 +234,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
 
                 // Append the tile index i to the adjacency list
                 const new_item_ptr = v.value_ptr.addOneAssumeCapacity();
-                new_item_ptr.* = tile_index;
+                new_item_ptr.* = @truncate(tile_index);
               }
             }
 
@@ -273,7 +278,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             self.allocator.free(self.adjacencies);
         }
 
-        pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
+        pub fn solve(self: *Self, grid: []u8, dimensions: DimensionT) !void {
             // Check if provided dimensions fit into provided grid
             var size: usize = 1;
             inline for (std.meta.fields(DimensionT)) |f| {
@@ -316,7 +321,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             // Set all the positions to their solved values
             // Should not panic, since we confirmed all positions have at least 1 possibility
             for (grid, 0..) |*p, i| {
-                p.* = self.possibilities[i].findFirstSet().?;
+                p.* = @truncate(self.possibilities[i].findFirstSet().?);
             }
 
         }
@@ -513,7 +518,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             tiles.set(indeces.items[i]);
         }
 
-        fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
+        fn getAdjacencies(self: *Self, p: GridIndex, k: usize) *const BitsetT {
             return &self.adjacencies[p][k];
         }
 
