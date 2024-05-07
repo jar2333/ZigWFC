@@ -2,6 +2,7 @@
 #define ZIGWFC_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 struct wfc_SquareTile {
     uint8_t xpos;
