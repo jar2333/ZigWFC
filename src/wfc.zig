@@ -500,21 +500,29 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             }
         }
 
+        // We need to get indeces of set positions in the bitset, and uniform randomly choose among them.
+        // NOTE: Since the absolute max number of tiles is relatively small when TileIndex == u8, we use a fixed buffer allocator :)
         // TODO: Make more efficient using tiles.unsetAll() for static bitsets
         fn collapseRandom(self: *Self, tiles: *BitsetT) !void {
-            // We need to get indeces for tiles that are possible
-            var indeces = std.ArrayList(usize).init(self.allocator);
-            defer indeces.deinit();
+            comptime std.debug.assert(TileIndex == u8);
+            var buffer: [MAX_TILES_LENGTH*@sizeOf(u8)]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buffer);
+            const alloc = fba.allocator();
+
+            var indeces = try std.ArrayListUnmanaged(u8).initCapacity(alloc, tiles.capacity());
+            defer indeces.deinit(alloc);
 
             // Get all set bit indeces and store them, then unset
             var iterator = tiles.iterator(.{});
             while (iterator.next()) |j| {
-                try indeces.append(j);
+                const new_item_ptr = indeces.addOneAssumeCapacity();
+                new_item_ptr.* = @truncate(j);
+
                 tiles.unset(j);                
             }
 
             // Set the tile which corresponds to a random index among possible indeces 
-            const i = self.rand.uintLessThan(TileIndex, indeces.items.len);
+            const i = self.rand.uintLessThan(usize, indeces.items.len);
             tiles.set(indeces.items[i]);
         }
 
