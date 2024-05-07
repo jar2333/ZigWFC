@@ -65,7 +65,8 @@ const CubeDimensions = packed struct {
 
 pub const WFCError = error{
     InvalidGridSize,
-    Contradiction
+    Contradiction,
+    TooManyTiles,
 };
 
 // O(tiles.len*num_sides) complexity adjacency extraction algorithm:
@@ -123,10 +124,10 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
     return struct {
         const Self = @This();
 
-        const TileIndex = usize;
+        const TileIndex = u8;
         const GridIndex = usize;
 
-        const SideIndex = usize;
+        const MAX_TILES_LENGTH = 1 << @bitSizeOf(TileIndex);
 
         const BitsetT = std.bit_set.DynamicBitSet;
 
@@ -177,6 +178,10 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
         /// ==================
 
         pub fn init(alloc: std.mem.Allocator, tiles: []const TileT, rand: std.rand.Random) !Self {
+            if (tiles.len > MAX_TILES_LENGTH) {
+                return WFCError.TooManyTiles;
+            }
+
             // Initialize adjacencies array and bitsets in adjacencies array
             var adjacencies: [][num_sides]BitsetT = try alloc.alloc([num_sides]BitsetT, tiles.len);
             for (0..tiles.len) |i| {
@@ -229,7 +234,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
 
                 // Append the tile index i to the adjacency list
                 const new_item_ptr = v.value_ptr.addOneAssumeCapacity();
-                new_item_ptr.* = tile_index;
+                new_item_ptr.* = @truncate(tile_index);
               }
             }
 
@@ -273,7 +278,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             self.allocator.free(self.adjacencies);
         }
 
-        pub fn solve(self: *Self, grid: []usize, dimensions: DimensionT) !void {
+        pub fn solve(self: *Self, grid: []u8, dimensions: DimensionT) !void {
             // Check if provided dimensions fit into provided grid
             var size: usize = 1;
             inline for (std.meta.fields(DimensionT)) |f| {
@@ -316,7 +321,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             // Set all the positions to their solved values
             // Should not panic, since we confirmed all positions have at least 1 possibility
             for (grid, 0..) |*p, i| {
-                p.* = self.possibilities[i].findFirstSet().?;
+                p.* = @truncate(self.possibilities[i].findFirstSet().?);
             }
 
         }
@@ -435,10 +440,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
         // x = i % width;
         // y = (i / width)%height;
         // z = i / (width*height)
-        // NOTE: Do i use a *[num_sides]?GridIndex or a []?GridIndex with an assert(len == num_sides) ? 
-        // NOTE: Consider moving the nulling to propagate ? 
-        fn getNeighbors(self: *Self, neighbors: []?GridIndex, p: GridIndex) void {
-            std.debug.assert(neighbors.len == num_sides);
+        fn getNeighbors(self: *Self, neighbors: *[num_sides]?GridIndex, p: GridIndex) void {
             const n = self.grid.len;
 
             // Gets easily indexable width, height(, depth)
@@ -498,25 +500,33 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             }
         }
 
-        // TODO: Make more efficient using Zig 0.12.0 tiles.unsetAll() and an iterator
+        // We need to get indeces of set positions in the bitset, and uniform randomly choose among them.
+        // NOTE: Since the absolute max number of tiles is relatively small when TileIndex == u8, we use a fixed buffer allocator :)
+        // TODO: Make more efficient using tiles.unsetAll() for static bitsets
         fn collapseRandom(self: *Self, tiles: *BitsetT) !void {
-            // We need to get indeces for tiles that are possible
-            var indeces = std.ArrayList(usize).init(self.allocator);
-            defer indeces.deinit();
+            comptime std.debug.assert(TileIndex == u8);
+            var buffer: [MAX_TILES_LENGTH*@sizeOf(u8)]u8 = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buffer);
+            const alloc = fba.allocator();
+
+            var indeces = try std.ArrayListUnmanaged(u8).initCapacity(alloc, tiles.capacity());
+            defer indeces.deinit(alloc);
 
             // Get all set bit indeces and store them, then unset
             var iterator = tiles.iterator(.{});
             while (iterator.next()) |j| {
-                try indeces.append(j);
+                const new_item_ptr = indeces.addOneAssumeCapacity();
+                new_item_ptr.* = @truncate(j);
+
                 tiles.unset(j);                
             }
 
             // Set the tile which corresponds to a random index among possible indeces 
-            const i = self.rand.uintLessThan(TileIndex, indeces.items.len);
+            const i = self.rand.uintLessThan(usize, indeces.items.len);
             tiles.set(indeces.items[i]);
         }
 
-        fn getAdjacencies(self: *Self, p: GridIndex, k: SideIndex) *const BitsetT {
+        fn getAdjacencies(self: *Self, p: GridIndex, k: usize) *const BitsetT {
             return &self.adjacencies[p][k];
         }
 

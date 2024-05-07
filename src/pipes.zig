@@ -78,7 +78,7 @@ pub fn main() !void {
         // =============
         // = Run WFC
         // =============
-        const grid = try allocator.alloc(usize, cfg.width*cfg.height);
+        const grid = try allocator.alloc(u8, cfg.width*cfg.height);
         defer allocator.free(grid);
 
         try runWFC(allocator, cfg, grid);
@@ -153,7 +153,7 @@ fn printHelp() !void {
     try w.print(helpMessage, .{});
 }
 
-fn runWFC(allocator: std.mem.Allocator, cfg: WFCConfig, grid: []usize) !void {
+fn runWFC(allocator: std.mem.Allocator, cfg: WFCConfig, grid: []u8) !void {
     const seed = cfg.seed;
     const tiles = cfg.tiles;
     const width = cfg.width;
@@ -172,7 +172,7 @@ fn runWFC(allocator: std.mem.Allocator, cfg: WFCConfig, grid: []usize) !void {
     try solver.solve(grid, .{.x = width, .y = height});
 }
 
-fn printSquareGrid(grid: []const usize, width: usize, height: usize) !void {
+fn printSquareGrid(grid: []const u8, width: usize, height: usize) !void {
     std.debug.assert(grid.len == width*height);
     const w = io.getStdOut().writer();
 
