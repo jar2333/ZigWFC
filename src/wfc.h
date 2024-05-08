@@ -23,3 +23,17 @@ extern void *wfc_initSquareGridSolver(wfc_SquareTile *tiles, size_t tiles_size, 
 extern void wfc_freeSquareGridSolver(void *solver);
 
 extern int wfc_solveSquareGrid(void *solver, uint8_t *grid, size_t grid_size, size_t width, size_t height);
+
+struct wfc_CubeTile {
+    uint8_t xpos;
+    uint8_t ypos;
+    uint8_t zpos;
+    uint8_t xneg;
+    uint8_t yneg;
+    uint8_t zneg;
+};
+
+extern void *wfc_initCubeGridSolver(wfc_CubeTile *tiles, size_t tiles_size, uint64_t seed, int *err_code);
+extern void wfc_freeCubeGridSolver(void *solver);
+
+extern int wfc_solveCubeGrid(void *solver, uint8_t *grid, size_t grid_size, size_t width, size_t height, size_t depth);
