@@ -66,3 +66,48 @@ export fn wfc_solveSquareGrid(solver: *anyopaque, grid: [*]u8, grid_size: usize,
 
     return WFC_OK;
 }
+
+// -------------
+// - Cube grids
+// -------------
+const wfc_CubeTile = wfc.CubeTile;
+
+export fn wfc_initCubeGridSolver(tiles: [*]wfc_CubeTile, tiles_size: usize, seed: u64, err_code: *c_int) ?*anyopaque {
+    const allocator = std.heap.c_allocator;
+
+    const solver = allocator.create(CubeSolver) catch {
+        err_code.* = WFC_OUT_OF_MEMORY;
+        return null;
+    };
+
+    var prng = std.rand.DefaultPrng.init(seed);
+    const rand = prng.random();
+    solver.* = CubeSolver.init(allocator, tiles[0..tiles_size], rand) catch |err| {
+        switch (err) {
+            WFCError.TooManyTiles => err_code.* = WFC_TOO_MANY_TILES,
+            else => err_code.* = WFC_OUT_OF_MEMORY, 
+        }
+        return null;
+    };
+
+    return solver;
+}
+
+export fn wfc_freeCubeGridSolver(solver: *anyopaque) void {
+    const solver_ptr: *CubeSolver = @ptrCast(@alignCast(solver));
+    solver_ptr.deinit();
+}
+
+export fn wfc_solveCubeGrid(solver: *anyopaque, grid: [*]u8, grid_size: usize, width: usize, height: usize, depth: usize) c_int {
+    const solver_ptr: *CubeSolver = @ptrCast(@alignCast(solver));
+
+    solver_ptr.solve(grid[0..grid_size], .{.x = width, .y = height, .z = depth}) catch |err| {
+        switch (err) {
+            WFCError.Contradiction => return WFC_CONTRADICTION,
+            WFCError.InvalidGridSize => return WFC_INVALID_GRID_SIZE,
+            else => return WFC_OUT_OF_MEMORY, 
+        }
+    };
+
+    return WFC_OK;
+}
