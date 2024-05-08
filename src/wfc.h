@@ -4,6 +4,14 @@
 #include <stdint.h>
 #include <stddef.h>
 
+enum wfc_error {
+    WFC_OK,
+    WFC_CONTRADICTION,
+    WFC_INVALID_GRID_SIZE,
+    WFC_TOO_MANY_TILES,
+    WFC_OUT_OF_MEMORY
+};
+
 struct wfc_SquareTile {
     uint8_t xpos;
     uint8_t ypos;
