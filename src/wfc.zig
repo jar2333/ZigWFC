@@ -509,6 +509,7 @@ pub fn Solver(comptime TileT: type, comptime _: SolverOptions) type {
             var fba = std.heap.FixedBufferAllocator.init(&buffer);
             const alloc = fba.allocator();
 
+            // Since the indeces do not surpass what's possible to store in a u8, we use u8s to save storage space
             var indeces = try std.ArrayListUnmanaged(u8).initCapacity(alloc, tiles.capacity());
             defer indeces.deinit(alloc);
 
